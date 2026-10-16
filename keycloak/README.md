@@ -14,12 +14,15 @@ propio repositorio lo suyo. Este trae dos ficheros:
 | Fichero | Qué aporta |
 |---|---|
 | `mto-resources-partial-import.json` | El cliente `mto-resources-api`, sus permisos y los perfiles funcionales `mto-resources-*`. Vale para cualquier entorno. |
-| `mto-resources-dev.json` | Los usuarios de desarrollo (`recursos.lector`, `recursos.gestor`, `recursos.responsable`, contraseña `local`). Aparte a propósito, para poder aplicar lo anterior en un entorno desplegado sin arrastrarlos. |
+| `mto-resources-dev.json` | Los usuarios de desarrollo, contraseña `local`: `recursos.lector`, `recursos.gestor` y `recursos.responsable`, con los perfiles de abajo, y uno por cada perfil de puesto (al final). Aparte a propósito, para poder aplicar lo anterior en un entorno desplegado sin arrastrarlos. |
 
 Los aplica `mto-platform/keycloak/apply-partials.sh`, que fija el orden: primero las parciales que
 crean los clientes (la de `mto-notification` la primera, porque los perfiles de los demás nombran sus
-roles), después `mto-ops-cross-service.json` y `mto-positions-cross-service.json`, que los nombran, y
-al final los ficheros de desarrollo.
+roles; esta, tras la de `mto-field`), después `mto-ops-cross-service.json` y
+`mto-positions-cross-service.json`, que los nombran, y al final los ficheros de desarrollo. El de este
+repositorio tiene que ir detrás del de puestos: sus usuarios de puesto llevan esos perfiles, y un usuario que lleva un
+perfil que todavía no existe no da error, porque Keycloak crea un rol vacío con ese nombre y la persona
+entra sin permisos (`check_realm_consistency.py` de la plataforma lo comprueba).
 
 `mto-resources` no declara ningún cliente de navegador: los de login (`mto-frontend` del realm base y
 `mto-backoffice`) llevan un *audience mapper* hacia `mto-resources-api`.
@@ -58,3 +61,18 @@ en `mto-platform/keycloak/mto-positions-cross-service.json`. Dicen qué puede ha
 servicio. A quién dirige una persona y en qué EP lo dice el organigrama de `mto-resources`, no Keycloak:
 se guardan separados a propósito (un suplente puede necesitar el perfil sin cambiar de puesto, y
 `mto-resources` no toca el realm).
+
+Para probarlos, `mto-resources-dev.json` trae un usuario por puesto (contraseña `local`):
+
+| Usuario | Perfil de puesto |
+|---|---|
+| `equipo.operario` | `mto-position-worker` |
+| `equipo.jefe` | `mto-position-team-leader` |
+| `equipo.supervisor` | `mto-position-supervisor` |
+| `equipo.jefe-supervisores` | `mto-position-chief-supervisor` |
+| `mantenimiento.jefe` | `mto-position-chief-maintenance` |
+| `proyecto.jefe` | `mto-position-project-manager` |
+
+No están en ningún grupo de equipo de `mto-field` (`EQ-NORTE`, `EQ-SUR`): el supervisor y el jefe de
+supervisores, con `field-supervise`, se unen a cualquier turno, pero el operario y el jefe de equipo
+no se unen a ninguno mientras no estén en el grupo del suyo.

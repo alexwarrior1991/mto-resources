@@ -26,7 +26,11 @@ cd ../mto-resources && ./mvnw spring-boot:run      # dev profile, http://localho
 ```
 
 Development users (password `local`): `recursos.lector` (read), `recursos.gestor` (people, teams, fleet
-and locations), `recursos.responsable` (and deactivating).
+and locations), `recursos.responsable` (and deactivating), and one per position profile of
+`mto-platform/keycloak/mto-positions-cross-service.json`: `equipo.operario` (worker), `equipo.jefe`
+(team leader), `equipo.supervisor` (supervisor), `equipo.jefe-supervisores` (chief supervisor),
+`mantenimiento.jefe` (chief of maintenance) and `proyecto.jefe` (project manager). See
+[`keycloak/README.md`](keycloak/README.md).
 
 To load a new consumer (or after `mto-maintenance` declared its queue the first time):
 
