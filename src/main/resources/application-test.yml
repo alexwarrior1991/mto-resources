@@ -1,0 +1,49 @@
+server:
+  port: ${SERVER_PORT:0}
+
+spring:
+  config:
+    activate:
+      on-profile: test
+  datasource:
+    url: ${TEST_DATABASE_URL:${DATABASE_URL:jdbc:postgresql://localhost:5432/mto_resources_test}}
+    username: ${TEST_DATABASE_USERNAME:${DATABASE_USERNAME:}}
+    password: ${TEST_DATABASE_PASSWORD:${DATABASE_PASSWORD:}}
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: ${SPRING_FLYWAY_ENABLED:true}
+    locations: ${SPRING_FLYWAY_LOCATIONS:classpath:db/migration}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    show-sql: false
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8082/realms/mto}
+
+app:
+  security:
+    audience-validation-enabled: ${KEYCLOAK_AUDIENCE_VALIDATION_ENABLED:false}
+    expose-api-docs: ${APP_SECURITY_EXPOSE_API_DOCS:true}
+  # Sin broker: ni topologia, ni consumidor, ni outbox (el publicador es el NoOp). El canal se prueba
+  # en MessagingLayerTest y el outbox en sus propios tests.
+  rabbitmq:
+    enabled: ${APP_RABBITMQ_ENABLED:false}
+    maintenance:
+      listener-enabled: ${APP_RABBITMQ_MAINTENANCE_LISTENER_ENABLED:false}
+  # El latido, el abandono y la purga de las operaciones de fondo los llaman los tests a mano.
+  operations:
+    scheduling-enabled: false
+
+management:
+  endpoint:
+    health:
+      show-details: ${MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS:always}
+
+logging:
+  level:
+    root: ${LOGGING_LEVEL_ROOT:WARN}
+    com.alejandro.mtoresources: ${LOGGING_LEVEL_APP:INFO}

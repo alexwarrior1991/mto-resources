@@ -1,0 +1,114 @@
+{
+  "roles": {
+    "client": {
+      "mto-resources-api": [
+        {
+          "name": "resources-read",
+          "description": "Consulta de personas, organigrama, sitios de aparcamiento, modelos y vehiculos, sus ubicaciones y el tablero de la flota"
+        },
+        {
+          "name": "resources-write",
+          "description": "Alta y modificacion de personas, unidades del organigrama, linemen de los equipos y sitios de aparcamiento"
+        },
+        {
+          "name": "resources-fleet-write",
+          "description": "Alta y modificacion de modelos de vehiculo y de vehiculos"
+        },
+        {
+          "name": "resources-location-write",
+          "description": "Registrar donde esta un vehiculo (POST /vehicles/{id}/locations), y nada mas"
+        },
+        {
+          "name": "resources-delete",
+          "description": "Desactivar personas, unidades, vehiculos, modelos y sitios (DELETE, o PUT/PATCH con active=false)"
+        },
+        {
+          "name": "ops-metrics",
+          "description": "Lectura de los endpoints de Actuator de mto-resources"
+        },
+        {
+          "name": "ops-write",
+          "description": "Operaciones de Actuator de mto-resources que modifican estado (outbox, republish)"
+        }
+      ]
+    },
+    "realm": [
+      {
+        "name": "mto-resources-viewer",
+        "description": "Consulta de personal, organigrama y flota. Lee tambien la infraestructura a la que se refieren (EP, vias, estaciones)",
+        "composite": true,
+        "composites": {
+          "client": {
+            "mto-resources-api": [
+              "resources-read"
+            ],
+            "mto-configuration-api": [
+              "config-read"
+            ],
+            "mto-notification-api": [
+              "notification-inbox"
+            ]
+          }
+        }
+      },
+      {
+        "name": "mto-resources-manager",
+        "description": "Gestion de personal, organigrama y flota: personas, equipos y sus linemen, modelos, vehiculos y donde esta cada uno",
+        "composite": true,
+        "composites": {
+          "client": {
+            "mto-resources-api": [
+              "resources-read",
+              "resources-write",
+              "resources-fleet-write",
+              "resources-location-write"
+            ],
+            "mto-configuration-api": [
+              "config-read"
+            ],
+            "mto-notification-api": [
+              "notification-inbox",
+              "notification-activity-read"
+            ]
+          }
+        }
+      },
+      {
+        "name": "mto-resources-admin",
+        "description": "Lo del gestor y, ademas, desactivar personas, unidades, vehiculos, modelos y sitios",
+        "composite": true,
+        "composites": {
+          "client": {
+            "mto-resources-api": [
+              "resources-read",
+              "resources-write",
+              "resources-fleet-write",
+              "resources-location-write",
+              "resources-delete"
+            ],
+            "mto-configuration-api": [
+              "config-read"
+            ],
+            "mto-notification-api": [
+              "notification-inbox",
+              "notification-activity-read"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "mto-resources-api",
+      "name": "API de personal, organizacion y flota MTO",
+      "description": "Resource server. No inicia ningun flujo: existe para declarar los permisos como roles de cliente y para ser la audiencia de los tokens. mto-resources no llama a nadie, asi que no tiene cuenta de servicio.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false
+    }
+  ]
+}

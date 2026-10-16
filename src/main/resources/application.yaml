@@ -1,3 +1,192 @@
 spring:
   application:
     name: mto-resources
+  profiles:
+    default: ${SPRING_PROFILES_DEFAULT:dev}
+  # Tomcat, @Scheduled (el relay del outbox, el latido de las operaciones de fondo) y los listeners de
+  # RabbitMQ en hilos virtuales: esperar a la base o al broker deja de costar un hilo del sistema. El
+  # limite de concurrencia pasa a ser el pool de Hikari, que por eso se fija abajo a la vista. Lo que
+  # corre en segundo plano usa su propio executor de hilos virtuales (AsyncConfiguration).
+  threads:
+    virtual:
+      enabled: ${SPRING_THREADS_VIRTUAL_ENABLED:true}
+  datasource:
+    hikari:
+      # Con Tomcat en hilos virtuales, cada peticion que espera a la base retiene una conexion: el
+      # recurso escaso es este pool, no los hilos. app.operations.max-active se elige con el a la vista.
+      maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:20}
+  # La API es un resource server: no emite tokens ni guarda usuarios, solo valida los que emite
+  # Keycloak. El JWK Set se descarga de forma perezosa, con lo que un Keycloak que aun no responde
+  # no impide arrancar. Este servicio no llama a nadie: no hay cuenta de servicio.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://auth.mto.local:8082/realms/mto}
+
+  # Historial de cambios (Hibernate Envers), como en mto-maintenance.
+  jpa:
+    properties:
+      org.hibernate.envers:
+        audit_table_suffix: _aud
+        revision_field_name: rev
+        revision_type_field_name: revtype
+        store_data_at_delete: true
+
+  # Publica sus eventos desde el outbox y consume los turnos de mto-maintenance. Lo que hay debajo de
+  # listener.simple lo aplica Spring Boot a traves del SimpleRabbitListenerContainerFactoryConfigurer
+  # (ver RabbitMqConfiguration).
+  rabbitmq:
+    host: ${SPRING_RABBITMQ_HOST:localhost}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    username: ${SPRING_RABBITMQ_USERNAME:guest}
+    password: ${SPRING_RABBITMQ_PASSWORD:guest}
+    virtual-host: ${SPRING_RABBITMQ_VIRTUAL_HOST:/}
+    # Un mensaje solo pasa a PUBLISHED cuando el broker lo confirma, y uno que no encaja en ninguna
+    # cola vuelve al publicador en vez de perderse. Sin confirms el relay no arranca.
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+      observation-enabled: ${SPRING_RABBITMQ_TEMPLATE_OBSERVATION_ENABLED:true}
+    listener:
+      simple:
+        acknowledge-mode: auto
+        observation-enabled: ${SPRING_RABBITMQ_LISTENER_OBSERVATION_ENABLED:true}
+        concurrency: ${SPRING_RABBITMQ_LISTENER_CONCURRENCY:1}
+        max-concurrency: ${SPRING_RABBITMQ_LISTENER_MAX_CONCURRENCY:5}
+        prefetch: ${SPRING_RABBITMQ_LISTENER_PREFETCH:10}
+        retry:
+          enabled: true
+          max-retries: ${SPRING_RABBITMQ_LISTENER_MAX_RETRIES:3}
+          initial-interval: 1s
+          multiplier: 2
+          max-interval: 10s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # outbox: el estado del outbox y su redrive; republish: republicar personas, equipos y
+        # vehiculos para un consumidor nuevo. Restringidos a ops-metrics y ops-write.
+        include: ${MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:health,info,metrics,prometheus,outbox,republish}
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: ${MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS:when_authorized}
+    info:
+      access: unrestricted
+    metrics:
+      access: unrestricted
+    prometheus:
+      access: unrestricted
+  health:
+    # Fuera del health: un broker caido retrasa los eventos, pero la API sigue sirviendo.
+    rabbit:
+      enabled: ${MANAGEMENT_HEALTH_RABBIT_ENABLED:false}
+  info:
+    env:
+      enabled: true
+  tracing:
+    enabled: ${MTO_TRACING_ENABLED:true}
+    sampling:
+      probability: ${MTO_TRACING_SAMPLING_PROBABILITY:0.1}
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+    metrics:
+      export:
+        enabled: false
+
+info:
+  app:
+    name: ${spring.application.name}
+    description: People, organization and fleet API
+    version: ${APP_VERSION:0.0.1-SNAPSHOT}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+    display-request-duration: true
+    doc-expansion: none
+    disable-swagger-default-url: true
+  show-actuator: ${SPRINGDOC_SHOW_ACTUATOR:false}
+
+app:
+  security:
+    client-id: ${KEYCLOAK_CLIENT_ID:mto-resources-api}
+    principal-claim: preferred_username
+    audience-validation-enabled: ${KEYCLOAK_AUDIENCE_VALIDATION_ENABLED:true}
+    required-audience: ${KEYCLOAK_AUDIENCE:mto-resources-api}
+    expose-api-docs: ${APP_SECURITY_EXPOSE_API_DOCS:false}
+
+  rabbitmq:
+    # Apaga la topologia, el consumidor y el outbox: la aplicacion arranca sin broker.
+    enabled: ${APP_RABBITMQ_ENABLED:true}
+    # Lo que se escucha de mto-maintenance: sus turnos. El exchange y la clave son contrato del
+    # emisor; la cola y su DLQ son de este servicio.
+    maintenance:
+      exchange: ${APP_RABBITMQ_MAINTENANCE_EXCHANGE:mto.maintenance.exchange}
+      queue: ${APP_RABBITMQ_MAINTENANCE_QUEUE:mto.resources.maintenance.queue}
+      routing-key: "${APP_RABBITMQ_MAINTENANCE_ROUTING_KEY:mto.maintenance.shift.*}"
+      dead-letter-exchange: ${APP_RABBITMQ_MAINTENANCE_DEAD_LETTER_EXCHANGE:mto.resources.maintenance.queue.dlx}
+      dead-letter-queue: ${APP_RABBITMQ_MAINTENANCE_DEAD_LETTER_QUEUE:mto.resources.maintenance.queue.dlq}
+      dead-letter-routing-key: ${APP_RABBITMQ_MAINTENANCE_DEAD_LETTER_ROUTING_KEY:mto.resources.maintenance.queue.dlq}
+      listener-enabled: ${APP_RABBITMQ_MAINTENANCE_LISTENER_ENABLED:true}
+    # Exchange propio: personas, equipos y vehiculos, con la clave mto.resources.<entidad>.<evento>.
+    # Solo se declara el exchange; las colas son de quien consume (mto-maintenance).
+    events:
+      exchange: ${APP_RABBITMQ_EVENTS_EXCHANGE:mto.resources.exchange}
+
+  # Firma de los mensajes, con EL MISMO secreto que el resto de productores y consumidores.
+  messaging:
+    signature:
+      secret: ${MESSAGING_SIGNATURE_SECRET:}
+      mode: ${MESSAGING_SIGNATURE_MODE:OPTIONAL}
+
+  # Outbox de los eventos propios, el mismo de mto-maintenance (ver alli cada clave).
+  outbox:
+    enabled: ${APP_OUTBOX_ENABLED:true}
+    max-attempts: ${APP_OUTBOX_MAX_ATTEMPTS:20}
+    initial-retry-delay: ${APP_OUTBOX_INITIAL_RETRY_DELAY:5s}
+    max-retry-delay: ${APP_OUTBOX_MAX_RETRY_DELAY:5m}
+    retry-jitter: 0.2
+    publisher-fixed-delay: ${APP_OUTBOX_PUBLISHER_FIXED_DELAY:5s}
+    batch-size: 50
+    claim-visibility-timeout: 5m
+    confirm-timeout: 10s
+    metrics-refresh-delay: 30s
+    # Los eventos de un mismo equipo o vehiculo salen en el orden en que se generaron.
+    strict-ordering-per-aggregate: true
+    immediate-dispatch: ${APP_OUTBOX_IMMEDIATE_DISPATCH:true}
+    purge:
+      enabled: ${APP_OUTBOX_PURGE_ENABLED:true}
+      retention: ${APP_OUTBOX_PURGE_RETENTION:7d}
+      batch-size: 500
+      max-batches-per-run: 20
+      fixed-delay: 1h
+
+  # Lo que tarda se vuelve asincrono (Prefer: respond-async, RFC 7240): el trabajo corre en un hilo
+  # virtual, la peticion lo espera hasta su presupuesto y, si no ha terminado, responde 202 con la
+  # operacion. El recurso escaso es la conexion que cada operacion retiene mientras trabaja, asi que
+  # hay un tope para todo el despliegue, contado en background_operation y no en memoria.
+  operations:
+    default-wait: ${APP_OPERATIONS_DEFAULT_WAIT:5s}
+    # Por debajo del read-timeout del gateway (15 s): mas, y el gateway cortaria con un 504 sin que el
+    # cliente llegara a saber la operacion.
+    max-wait: ${APP_OPERATIONS_MAX_WAIT:10s}
+    max-active: ${APP_OPERATIONS_MAX_ACTIVE:8}
+    heartbeat: ${APP_OPERATIONS_HEARTBEAT:5s}
+    stale-after: ${APP_OPERATIONS_STALE_AFTER:1m}
+    abandon-check: ${APP_OPERATIONS_ABANDON_CHECK:30s}
+    poll-initial: 200ms
+    poll-max: 2s
+    retention: ${APP_OPERATIONS_RETENTION:7d}
+    purge-every: 1h
+    purge-batch-size: 500
+    scheduling-enabled: ${APP_OPERATIONS_SCHEDULING_ENABLED:true}
