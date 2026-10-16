@@ -74,6 +74,9 @@
       ],
       "realmRoles": [
         "mto-position-worker"
+      ],
+      "groups": [
+        "/EQ-NORTE"
       ]
     },
     {
@@ -93,6 +96,9 @@
       ],
       "realmRoles": [
         "mto-position-team-leader"
+      ],
+      "groups": [
+        "/EQ-NORTE"
       ]
     },
     {
