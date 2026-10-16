@@ -61,3 +61,8 @@ and entity to the `IncomingEventHandler`s; an unknown entity is logged and ignor
 `source = SHIFT` and `sourceReference = mto-maintenance:shift:<id>`, and the same reference with the
 same `observedAt` is never recorded twice, so a republication of a shift does not repeat anything. An
 event without `vehicleIds` (an older `mto-maintenance`) moves nothing.
+
+The examples `mto-maintenance` versions for these three events (`docs/messaging/examples/shift-started.json`,
+`shift-closed.json` and `shift-cancelled.json` there) are copied in
+`src/test/resources/contracts/mto-maintenance/`, and `BusinessLayerTest` passes them through the real
+handler with a vehicle of its own: a key renamed there fails here, not in a vehicle's position.

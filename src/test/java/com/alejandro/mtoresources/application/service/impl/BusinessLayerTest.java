@@ -536,6 +536,42 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         assertEquals(14L, parked.position().trackId());
     }
 
+    /**
+     * Los ejemplos que publica mto-maintenance ({@code docs/messaging/examples/shift-*.json} de alli,
+     * copiados en {@code contracts/mto-maintenance/}) pasan por el manejador real: si mantenimiento
+     * renombra una clave que se lee aqui, falla esto y no la posicion de un vehiculo en produccion. Un
+     * cambio de esos ejemplos se copia aqui en el mismo cambio, como en mto-notification.
+     */
+    @Test
+    void theShiftEventsAsMtoMaintenancePublishesThemMoveItsVehicles() {
+        VehicleResponse towerCar = railVehicle(Set.of());
+        UUID shiftId = UUID.randomUUID();
+
+        shiftHandler.handle(contractEvent("shift-started", shiftId, towerCar.id()), context());
+        VehicleResponse working = vehicles.findById(towerCar.id());
+        assertEquals(VehicleLocationKind.ON_TRACK, working.position().kind());
+        assertEquals(2L, working.position().trackId());
+        assertEquals(0, new BigDecimal("12847.990").compareTo(working.position().kp()));
+        assertEquals(6L, working.position().executionPackageId());
+
+        shiftHandler.handle(contractEvent("shift-closed", shiftId, towerCar.id()), context());
+        VehicleResponse parked = vehicles.findById(towerCar.id());
+        assertEquals(VehicleLocationKind.PARKED, parked.position().kind());
+        assertEquals(31L, parked.position().trackId(), "Where the shift says it was left");
+        assertEquals(0, new BigDecimal("4.250").compareTo(parked.position().kp()));
+        assertEquals("mto-maintenance:shift:" + shiftId, parked.position().sourceReference());
+
+        // Un turno cancelado que llego a empezar deja el vehiculo en el aparcamiento del turno, en su via.
+        VehicleResponse other = railVehicle(Set.of());
+        UUID cancelledShift = UUID.randomUUID();
+        shiftHandler.handle(contractEvent("shift-started", cancelledShift, other.id()), context());
+        shiftHandler.handle(contractEvent("shift-cancelled", cancelledShift, other.id()), context());
+        VehicleResponse back = vehicles.findById(other.id());
+        assertEquals(VehicleLocationKind.PARKED, back.position().kind());
+        assertEquals("Herzliya siding", back.position().description());
+        assertEquals(2L, back.position().trackId());
+    }
+
     @Test
     void theDispatcherRoutesBySourceAndEntityRefusesTwoHandlersAndIgnoresTheUnknown() {
         java.util.List<String> handled = new ArrayList<>();
@@ -777,6 +813,22 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
                 handled.add(event.entityName() + "." + event.eventName());
             }
         };
+    }
+
+    /** Un ejemplo de mto-maintenance con su turno y su vehiculo cambiados por los de este test. */
+    private static IncomingEvent contractEvent(String name, UUID shiftId, UUID vehicleId) {
+        try (java.io.InputStream json = BusinessLayerTest.class.getResourceAsStream("/contracts/mto-maintenance/" + name + ".json")) {
+            String text = new String(java.util.Objects.requireNonNull(json, name).readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+                    .replace("f0000000-0000-4000-8000-000000000002", vehicleId.toString());
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = (Map<String, Object>) tools.jackson.databind.json.JsonMapper.builder().build()
+                    .readValue(text, Map.class).get("data");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> values = (Map<String, Object>) data.get("values");
+            return new IncomingEvent((String) data.get("entityName"), shiftId.toString(), (String) data.get("eventName"), values);
+        } catch (java.io.IOException failure) {
+            throw new java.io.UncheckedIOException(failure);
+        }
     }
 
     private static IncomingEventContext context() {

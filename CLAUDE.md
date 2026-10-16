@@ -108,7 +108,9 @@ Publishes `person`, `team` and `vehicle` (`created`/`updated`/`deactivated`) on 
 through the outbox, inside the business transaction; declares no queue. Consumes
 `mto.maintenance.shift.*` on its own queue `mto.resources.maintenance.queue` (DLX/DLQ) through the
 idempotent inbox. **Keys are only added**; a new key or event changes its example in
-`docs/messaging/examples/` in the same commit.
+`docs/messaging/examples/` in the same commit. The other way round, the shift examples of
+`mto-maintenance` are copied in `src/test/resources/contracts/mto-maintenance/` and `BusinessLayerTest`
+runs them through the real handler: a change of those examples is copied here in the same change.
 
 ### Testing
 
