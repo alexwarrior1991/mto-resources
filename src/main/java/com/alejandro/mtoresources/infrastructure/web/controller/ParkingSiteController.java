@@ -6,6 +6,7 @@ import com.alejandro.mtoresources.application.dto.fleet.ParkingSiteRequest;
 import com.alejandro.mtoresources.application.dto.fleet.ParkingSiteResponse;
 import com.alejandro.mtoresources.application.dto.fleet.ParkingSiteUpdateRequest;
 import com.alejandro.mtoresources.application.service.ParkingSiteService;
+import com.alejandro.mtoresources.configuration.security.SecurityRoles;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.ParkingSiteKind;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -19,6 +20,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -52,6 +54,7 @@ public class ParkingSiteController {
     }
 
     @Operation(summary = "Update parking site")
+    @PreAuthorize("!#request.deactivating or hasRole('" + SecurityRoles.RESOURCES_DELETE + "')")
     @PutMapping("/{id}")
     public ResponseEntity<ParkingSiteResponse> update(@PathVariable UUID id, @Valid @RequestBody ParkingSiteUpdateRequest request) {
         return ResponseEntity.ok(siteService.update(id, request));
@@ -60,6 +63,7 @@ public class ParkingSiteController {
     @Operation(summary = "Patch parking site", description = "application/merge-patch+json: null empties the optional fields.",
             requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(content = @Content(mediaType = MergePatch.MEDIA_TYPE,
                     schema = @Schema(implementation = ParkingSiteUpdateRequest.class))))
+    @PreAuthorize("!#patch.values().deactivating or hasRole('" + SecurityRoles.RESOURCES_DELETE + "')")
     @PatchMapping(value = "/{id}", consumes = MergePatch.MEDIA_TYPE)
     public ResponseEntity<ParkingSiteResponse> patch(@PathVariable UUID id,
                                                      @Parameter(hidden = true) @Valid MergePatch<ParkingSiteUpdateRequest> patch) {

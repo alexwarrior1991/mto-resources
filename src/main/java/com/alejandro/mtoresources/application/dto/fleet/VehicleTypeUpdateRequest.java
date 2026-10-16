@@ -63,4 +63,9 @@ public record VehicleTypeUpdateRequest(
         Boolean active,
         Long version
 ) {
+
+    /** Retirar pide ademas resources-delete, como el DELETE. */
+    public boolean isDeactivating() {
+        return Boolean.FALSE.equals(active);
+    }
 }

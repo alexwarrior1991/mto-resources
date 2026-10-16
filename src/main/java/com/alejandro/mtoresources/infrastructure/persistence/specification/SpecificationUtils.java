@@ -3,6 +3,7 @@ package com.alejandro.mtoresources.infrastructure.persistence.specification;
 import jakarta.persistence.criteria.Path;
 import org.springframework.data.jpa.domain.Specification;
 
+import java.util.Collection;
 import java.util.UUID;
 
 /**
@@ -29,6 +30,14 @@ public final class SpecificationUtils {
             return alwaysTrue();
         }
         return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get(attribute), value);
+    }
+
+    /** Cualquiera de los valores; sin valores (nulo o vacio), no filtra. */
+    public static <T> Specification<T> inValues(String attribute, Collection<?> values) {
+        if (values == null || values.isEmpty()) {
+            return alwaysTrue();
+        }
+        return (root, query, criteriaBuilder) -> root.get(attribute).in(values);
     }
 
     public static <T> Specification<T> associationIdEquals(String association, UUID id) {

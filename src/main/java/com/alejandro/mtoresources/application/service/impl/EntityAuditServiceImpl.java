@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -56,7 +57,7 @@ class EntityAuditServiceImpl implements EntityAuditService {
         // maestros, que se escriben con SQL nativo y no dejan revisión (docs/07-auditing.md). Aquí no
         // hay revisión de partida. Los clientes lo dicen como «sin historial todavía».
         if (totalElements == 0) {
-            throw new NotFoundException(entityType.getSimpleName(), id);
+            throw new NotFoundException(aggregateName(entityType), id);
         }
 
         List<Object[]> rows = revisionsQuery(auditReader, entityType, id)
@@ -126,5 +127,19 @@ class EntityAuditServiceImpl implements EntityAuditService {
                 number == 0,
                 pageable.getOffset() + contentSize >= totalElements
         );
+    }
+
+    /**
+     * El nombre del agregado como lo dicen los demas 404 ({@code "Organization unit"} para
+     * {@code OrganizationUnit}), que es de donde sale el prefijo del codigo de error: un historial
+     * vacio de una unidad es {@code UNI-404}, como la unidad que no existe, y no {@code APP-404}.
+     */
+    static String aggregateName(Class<?> entityType) {
+        String[] words = entityType.getSimpleName().split("(?<=[a-z])(?=[A-Z])");
+        StringBuilder name = new StringBuilder(words[0]);
+        for (int i = 1; i < words.length; i++) {
+            name.append(' ').append(words[i].toLowerCase(Locale.ROOT));
+        }
+        return name.toString();
     }
 }

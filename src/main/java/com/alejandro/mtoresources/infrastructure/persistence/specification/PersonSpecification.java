@@ -8,6 +8,7 @@ import jakarta.persistence.criteria.Root;
 import jakarta.persistence.criteria.Subquery;
 import org.springframework.data.jpa.domain.Specification;
 
+import java.util.Collection;
 import java.util.UUID;
 
 /** Los filtros de {@code GET /people}. */
@@ -16,10 +17,10 @@ public final class PersonSpecification {
     private PersonSpecification() {
     }
 
-    public static Specification<Person> filter(String search, PersonCategory category, UUID unitId, Boolean active) {
+    public static Specification<Person> filter(String search, Collection<PersonCategory> categories, UUID unitId, Boolean active) {
         return Specification.allOf(
                 search(search),
-                SpecificationUtils.equalsEnum("category", category),
+                SpecificationUtils.inValues("category", categories),
                 inUnit(unitId),
                 SpecificationUtils.equalsBoolean("active", active)
         );

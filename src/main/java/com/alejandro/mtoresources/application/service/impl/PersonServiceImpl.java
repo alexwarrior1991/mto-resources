@@ -38,6 +38,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -151,9 +152,9 @@ class PersonServiceImpl implements PersonService {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResponse<PersonResponse> search(String search, PersonCategory category, UUID unitId, Boolean active, Pageable pageable) {
+    public PageResponse<PersonResponse> search(String search, Collection<PersonCategory> categories, UUID unitId, Boolean active, Pageable pageable) {
         return PageMapper.toPageResponse(
-                repository.findAll(PersonSpecification.filter(search, category, unitId, active), pageable), mapper::toResponse);
+                repository.findAll(PersonSpecification.filter(search, categories, unitId, active), pageable), mapper::toResponse);
     }
 
     @Override

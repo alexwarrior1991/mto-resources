@@ -6,6 +6,7 @@ import com.alejandro.mtoresources.application.dto.fleet.VehicleTypeRequest;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleTypeResponse;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleTypeUpdateRequest;
 import com.alejandro.mtoresources.application.service.VehicleTypeService;
+import com.alejandro.mtoresources.configuration.security.SecurityRoles;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCapability;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCategory;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleMobility;
@@ -21,6 +22,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -56,6 +58,7 @@ public class VehicleTypeController {
 
     @Operation(summary = "Update vehicle type", description = "Code and mobility do not change. Every vehicle of the model is republished, "
             + "because its event carries the model.")
+    @PreAuthorize("!#request.deactivating or hasRole('" + SecurityRoles.RESOURCES_DELETE + "')")
     @PutMapping("/{id}")
     public ResponseEntity<VehicleTypeResponse> update(@PathVariable UUID id, @Valid @RequestBody VehicleTypeUpdateRequest request) {
         return ResponseEntity.ok(typeService.update(id, request));
@@ -64,6 +67,7 @@ public class VehicleTypeController {
     @Operation(summary = "Patch vehicle type", description = "application/merge-patch+json: null empties the optional figures.",
             requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(content = @Content(mediaType = MergePatch.MEDIA_TYPE,
                     schema = @Schema(implementation = VehicleTypeUpdateRequest.class))))
+    @PreAuthorize("!#patch.values().deactivating or hasRole('" + SecurityRoles.RESOURCES_DELETE + "')")
     @PatchMapping(value = "/{id}", consumes = MergePatch.MEDIA_TYPE)
     public ResponseEntity<VehicleTypeResponse> patch(@PathVariable UUID id,
                                                      @Parameter(hidden = true) @Valid MergePatch<VehicleTypeUpdateRequest> patch) {

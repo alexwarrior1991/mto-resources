@@ -34,6 +34,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
+import java.util.List;
 import java.util.UUID;
 
 @Validated
@@ -78,15 +79,15 @@ public class PersonController {
     }
 
     @Operation(summary = "Search people", description = "search matches the code, the name, the username or the employee number; "
-            + "unitId, who leads that unit or is one of its linemen now.")
+            + "category may be repeated (any of them); unitId, who leads that unit or is one of its linemen now.")
     @GetMapping(ResourcesApiPaths.PEOPLE)
     public ResponseEntity<PageResponse<PersonResponse>> search(
             @RequestParam(required = false) String search,
-            @RequestParam(required = false) PersonCategory category,
+            @RequestParam(name = "category", required = false) List<PersonCategory> categories,
             @RequestParam(required = false) UUID unitId,
             @RequestParam(required = false) Boolean active,
             @PageableDefault(size = 20, sort = {"lastName", "firstName", "id"}, direction = Sort.Direction.ASC) Pageable pageable) {
-        return ResponseEntity.ok(personService.search(search, category, unitId, active, pageable));
+        return ResponseEntity.ok(personService.search(search, categories, unitId, active, pageable));
     }
 
     @Operation(summary = "Deactivate person", description = "Never deleted: shifts and teams name them. Someone who leads a unit is not "

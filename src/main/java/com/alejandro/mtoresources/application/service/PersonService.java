@@ -10,6 +10,7 @@ import com.alejandro.mtoresources.application.dto.person.PersonUpdateRequest;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonCategory;
 import org.springframework.data.domain.Pageable;
 
+import java.util.Collection;
 import java.util.UUID;
 
 /** Las personas del dominio: su ficha, tengan o no usuario en Keycloak. */
@@ -23,7 +24,8 @@ public interface PersonService {
 
     PersonResponse findById(UUID id);
 
-    PageResponse<PersonResponse> search(String search, PersonCategory category, UUID unitId, Boolean active, Pageable pageable);
+    /** {@code categories} vacio o nulo: todas; si no, cualquiera de ellas. */
+    PageResponse<PersonResponse> search(String search, Collection<PersonCategory> categories, UUID unitId, Boolean active, Pageable pageable);
 
     /** Desactiva: no se borra nunca, porque los turnos y los equipos la nombran. */
     void deactivate(UUID id);

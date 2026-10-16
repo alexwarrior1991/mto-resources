@@ -119,7 +119,8 @@ PostgreSQL** with the whole context and a `@Primary` `RecordingEventPublisher` â
 `mto-maintenance`: the rules here are rules of rows (locks, partial indexes, the position watermark),
 which a mocked repository would accept without testing; every case creates its own data with random
 codes because the database is shared. `DomainModelTest`, `ApiAuthorizationRulesTest` (probe controllers
-on the real routes), `SecurityLayerTest`, `MessagingLayerTest` (the consumer), `MessagingContractExamplesTest`,
+on the real routes, and the `@PreAuthorize` of every real `PUT`/`PATCH` whose body can say
+`active=false`), `SecurityLayerTest`, `MessagingLayerTest` (the consumer), `MessagingContractExamplesTest`,
 `JpaEntityModelTest`, `MtoResourcesApplicationTests` (the whole context with Tomcat, and that requests
 and background work run on virtual threads) and the outbox's own tests under
 `infrastructure/messaging/outbox`. `support/PostgreSQLTestContainer` starts `postgres:17-alpine`, or uses

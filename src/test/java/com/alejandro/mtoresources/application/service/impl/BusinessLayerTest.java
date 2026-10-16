@@ -53,6 +53,7 @@ import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleMobil
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleOperationalStatus;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.WorkDiscipline;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.VehiclePositionRepository;
+import com.alejandro.mtoresources.infrastructure.web.exception.GlobalExceptionHandler;
 import com.alejandro.mtoresources.support.PostgreSQLTestContainer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -63,6 +64,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -89,6 +91,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -188,6 +191,26 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
                 "New", null, null, null, null, null, null, null, null, null, person.version() + 1))));
         assertThrows(ValidationException.class, () -> people.patch(person.id(),
                 new MergePatch<>(new PersonUpdateRequest(null, null, null, null, null, null, null, null, null, null, null), Set.of("firstName"))));
+    }
+
+    /**
+     * Los selectores de las pantallas piden varias categorias a la vez (los linemen son operarios o
+     * jefes de equipo; el jefe de un turno, cualquiera menos un operario): {@code category} se repite.
+     */
+    @Test
+    void theSearchTakesSeveralCategoriesAtOnceAndNoneMeansAll() {
+        String surname = "Cat" + random();
+        PersonResponse worker = people.create(new PersonRequest("W", surname, PersonCategory.WORKER, null, null, null, null, null, null));
+        PersonResponse leader = people.create(new PersonRequest("L", surname, PersonCategory.TEAM_LEADER, null, null, null, null, null, null));
+        PersonResponse supervisor = people.create(new PersonRequest("S", surname, PersonCategory.SUPERVISOR, null, null, null, null, null, null));
+
+        assertEquals(Set.of(worker.id(), leader.id()), ids(people.search(surname,
+                List.of(PersonCategory.WORKER, PersonCategory.TEAM_LEADER), null, null, PageRequest.of(0, 10)).content()));
+        assertEquals(Set.of(supervisor.id()), ids(people.search(surname,
+                List.of(PersonCategory.SUPERVISOR), null, null, PageRequest.of(0, 10)).content()));
+        assertEquals(Set.of(worker.id(), leader.id(), supervisor.id()), ids(people.search(surname,
+                List.of(), null, null, PageRequest.of(0, 10)).content()));
+        assertEquals(3, people.search(surname, null, null, null, PageRequest.of(0, 10)).content().size());
     }
 
     // -------------------------------------------------------------------------- equipos
@@ -606,6 +629,22 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         assertEquals(2, vehicles.findRevisions(vehicle.id(), PageRequest.of(0, 10)).content().size());
     }
 
+    /**
+     * Un historial vacio es el 404 del agregado, con el nombre que dan los demas 404, que es de donde
+     * sale el prefijo del codigo: una unidad sin revisiones es UNI-404, como la que no existe, y no
+     * APP-404 por llamarse la clase OrganizationUnit.
+     */
+    @Test
+    void anEmptyHistoryIsTheNotFoundOfItsAggregate() {
+        NotFoundException unit = assertThrows(NotFoundException.class, () -> units.findRevisions(UUID.randomUUID(), PageRequest.of(0, 10)));
+        assertEquals("Organization unit", unit.getAggregate());
+        assertEquals("Person", assertThrows(NotFoundException.class,
+                () -> people.findRevisions(UUID.randomUUID(), PageRequest.of(0, 10))).getAggregate());
+        assertEquals("Vehicle", assertThrows(NotFoundException.class,
+                () -> vehicles.findRevisions(UUID.randomUUID(), PageRequest.of(0, 10))).getAggregate());
+        assertEquals("UNI-404", new GlobalExceptionHandler().handleNotFound(unit, new MockHttpServletRequest()).getBody().errorCode());
+    }
+
     // -------------------------------------------------------------------- republicacion
 
     @Test
@@ -718,6 +757,10 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
     }
 
     // ------------------------------------------------------------------------ fixtures
+
+    private static Set<UUID> ids(List<PersonResponse> people) {
+        return people.stream().map(PersonResponse::id).collect(Collectors.toSet());
+    }
 
     private PersonResponse person(PersonCategory category) {
         String suffix = random();

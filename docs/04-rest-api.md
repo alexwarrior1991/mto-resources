@@ -22,7 +22,7 @@ No role implies another (`ApiAuthorizationRulesTest`).
 
 | Route | What |
 |---|---|
-| `GET/POST /people`, `GET/PUT/PATCH/DELETE /people/{id}`, `GET /people/{id}/revisions` | People. Search by `search` (code, name, username, employee number), `category`, `unitId` (its head and open linemen), `active` |
+| `GET/POST /people`, `GET/PUT/PATCH/DELETE /people/{id}`, `GET /people/{id}/revisions` | People. Search by `search` (code, name, username, employee number), `category` (repeatable: any of them, as the crew pickers ask for `WORKER` and `TEAM_LEADER` at once), `unitId` (its head and open linemen), `active` |
 | `GET /me` | The person of the token, their units (`HEAD` or `LINEMAN`) and the EPs of those units and of everything under them. 404 `PER-404` when no record has the username |
 | `GET/POST /units`, `GET /units/tree`, `GET/PUT/PATCH/DELETE /units/{id}`, `GET /units/{id}/revisions` | The organization tree. A team is created complete (`headPersonId` + 2 to 6 `memberPersonIds`) |
 | `GET/PUT/POST /units/{id}/members`, `POST /units/{id}/members/{personId}/leave` | The linemen of a team: read (`includeFormer`), replace all at once, add one, one leaves |
@@ -53,12 +53,16 @@ work does not finish within that budget, with `Location: /api/v1/resources/opera
 call would have returned) or `error` (`status`, `errorCode`, `message`). Above
 `app.operations.max-active` live operations: 429 `OPS-429` with `Retry-After`.
 
+Every `Location` (a `201`, a `202`) carries the path **inside the service** (`/api/v1/resources/...`),
+not the gateway's (`/api/resources/...`): the clients behind the gateway do not follow it, they build the
+route from the id in the body, like with the other services.
+
 ## Error codes
 
 | Code | When |
 |---|---|
 | `VAL-001`, `REQ-400`, `REQ-VALIDATION` | A request that is malformed or breaks a rule of its own content (a team without leader, 1 or 7 linemen, an incoherent model, a future `observedAt`) |
-| `PER-404`, `UNI-404`, `VEH-404`, `VTY-404`, `PRK-404`, `OPS-404` | Not found |
+| `PER-404`, `UNI-404`, `VEH-404`, `VTY-404`, `PRK-404`, `OPS-404` | Not found, also the history (`/revisions`) of something without revisions: the code is the aggregate's, never `APP-404` |
 | `PER-409`, `UNI-409`, `VEH-409`, `VTY-409`, `PRK-409` | A repeated code, username, employee number, plate or rail number |
 | `UNI-001` | An organization rule: the crew limits, a parent of the wrong level, a head without the category, a person already in another team, a unit with active units under it |
 | `VEH-001` | A fleet rule: where a vehicle can be, towing and carrying, a retired vehicle or model, the default vehicle of an active team |
