@@ -25,9 +25,11 @@ the MDC (`correlationId`) and the `SecurityContext` of whoever asked: without th
 Envers revision and the `actor` of the events would be lost.
 
 The scarce resource is not the thread but the **connection**: a virtual thread is cheap, but while it
-works it holds a Hikari connection. So the pool size is explicit
-(`spring.datasource.hikari.maximum-pool-size`, 20) and everything that runs in the background has a cap
-for the whole deployment, counted in the database, not in a semaphore that three replicas would triple.
+works it holds a Hikari connection. So the pool size is explicit (`DATABASE_POOL_MAX_SIZE`, 10, as in
+`mto-maintenance` and `mto-stock`: the pools of every service share the 100 `max_connections` of the
+PostgreSQL of `mto-platform`) and everything that runs in the background has a cap for the whole
+deployment (`app.operations.max-active`, 4), counted in the database, not in a semaphore that three
+replicas would triple.
 
 ## Background operations (`BudgetedOperations`)
 

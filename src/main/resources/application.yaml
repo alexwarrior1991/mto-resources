@@ -10,11 +10,14 @@ spring:
   threads:
     virtual:
       enabled: ${SPRING_THREADS_VIRTUAL_ENABLED:true}
+  # Con Tomcat en hilos virtuales, cada peticion que espera a la base retiene una conexion: el recurso
+  # escaso es este pool, no los hilos. El PostgreSQL de mto-platform es uno para todos los servicios
+  # (max_connections 100 por defecto), asi que la suma de los pools de todas las instancias tiene que
+  # quedar por debajo; la misma variable y el mismo valor que mto-maintenance y mto-stock.
+  # app.operations.max-active se elige con el a la vista.
   datasource:
     hikari:
-      # Con Tomcat en hilos virtuales, cada peticion que espera a la base retiene una conexion: el
-      # recurso escaso es este pool, no los hilos. app.operations.max-active se elige con el a la vista.
-      maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:20}
+      maximum-pool-size: ${DATABASE_POOL_MAX_SIZE:10}
   # La API es un resource server: no emite tokens ni guarda usuarios, solo valida los que emite
   # Keycloak. El JWK Set se descarga de forma perezosa, con lo que un Keycloak que aun no responde
   # no impide arrancar. Este servicio no llama a nadie: no hay cuenta de servicio.
@@ -180,7 +183,7 @@ app:
     # Por debajo del read-timeout del gateway (15 s): mas, y el gateway cortaria con un 504 sin que el
     # cliente llegara a saber la operacion.
     max-wait: ${APP_OPERATIONS_MAX_WAIT:10s}
-    max-active: ${APP_OPERATIONS_MAX_ACTIVE:8}
+    max-active: ${APP_OPERATIONS_MAX_ACTIVE:4}
     heartbeat: ${APP_OPERATIONS_HEARTBEAT:5s}
     stale-after: ${APP_OPERATIONS_STALE_AFTER:1m}
     abandon-check: ${APP_OPERATIONS_ABANDON_CHECK:30s}
