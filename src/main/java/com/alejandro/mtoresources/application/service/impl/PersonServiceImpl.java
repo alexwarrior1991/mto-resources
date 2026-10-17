@@ -26,6 +26,7 @@ import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonCatego
 import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonEmployer;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.TeamMember;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.OrganizationUnitRepository;
+import com.alejandro.mtoresources.infrastructure.persistence.repository.PersonQualificationRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.PersonRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.TeamMemberRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.specification.PersonSpecification;
@@ -56,6 +57,7 @@ class PersonServiceImpl implements PersonService {
     private final PersonRepository repository;
     private final OrganizationUnitRepository unitRepository;
     private final TeamMemberRepository memberRepository;
+    private final PersonQualificationRepository qualifications;
     private final OrganizationLookups lookups;
     private final PersonMapper mapper;
     private final EntityAuditService auditService;
@@ -87,7 +89,8 @@ class PersonServiceImpl implements PersonService {
         requireCompany(person);
 
         Person saved = repository.saveAndFlush(person);
-        events.publish(ResourcesEvents.person(saved, ResourcesEvents.CREATED));
+        // Una persona nueva aun no tiene cualificaciones: se dan despues, en /people/{id}/qualifications.
+        events.publish(ResourcesEvents.person(saved, List.of(), ResourcesEvents.CREATED));
         return mapper.toResponse(saved);
     }
 
@@ -112,6 +115,9 @@ class PersonServiceImpl implements PersonService {
 
         // Los equipos en cuyo evento sale: se bloquean antes de cambiar nada (OrganizationLookups).
         List<OrganizationUnit> teams = lookups.lockTeams(lookups.teamsReferencing(id));
+        // Y su fila, aunque no cambie nada de ella: su evento cuenta sus cualificaciones, que se cambian con
+        // la persona bloqueada (PersonQualificationServiceImpl).
+        repository.findByIdForUpdate(id);
         String before = teamFacing(person);
 
         if (values.firstName() != null) {
@@ -137,7 +143,7 @@ class PersonServiceImpl implements PersonService {
         requireUnique(person.getId(), person.getUsername(), person.getEmployeeNumber(), person.getKeycloakUserId());
 
         Person saved = repository.saveAndFlush(person);
-        events.publish(ResourcesEvents.person(saved, ResourcesEvents.UPDATED));
+        events.publish(ResourcesEvents.person(saved, qualifications.findAllOfPerson(saved.getId()), ResourcesEvents.UPDATED));
         if (!before.equals(teamFacing(saved))) {
             lookups.publishActiveTeamsUpdated(teams);
         }
@@ -191,7 +197,7 @@ class PersonServiceImpl implements PersonService {
         }
         person.setActive(false);
         Person saved = repository.saveAndFlush(person);
-        events.publish(ResourcesEvents.person(saved, ResourcesEvents.DEACTIVATED));
+        events.publish(ResourcesEvents.person(saved, qualifications.findAllOfPerson(saved.getId()), ResourcesEvents.DEACTIVATED));
         lookups.publishActiveTeamsUpdated(teams);
     }
 

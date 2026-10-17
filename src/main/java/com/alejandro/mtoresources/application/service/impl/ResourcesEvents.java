@@ -3,10 +3,14 @@ package com.alejandro.mtoresources.application.service.impl;
 import com.alejandro.mtoresources.application.dto.messaging.DomainEvent;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnit;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Person;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonQualification;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.QualificationType;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Vehicle;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleType;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +34,9 @@ import java.util.UUID;
  * avisa de cambios, como {@code mto-notification}, no avisa de nada). Los de vehiculo llevan ademas
  * {@code availabilityChanged}: si ese cambio hizo que el vehiculo pasara de disponible a no disponible o
  * al reves, para que un aviso de «fuera de servicio» salga una vez y no con cada cambio de notas.</p>
+ *
+ * <p>Una lista (las cualificaciones de una persona) viaja siempre entera: quien guarda una instantanea
+ * sustituye la que tenia por la que llega. Las fechas viajan como texto ISO ({@code 2027-03-31}).</p>
  */
 public final class ResourcesEvents {
 
@@ -46,11 +53,16 @@ public final class ResourcesEvents {
 
     // ------------------------------------------------------------------------------- people
 
-    public static DomainEvent person(Person person, String eventName) {
-        return person(person, eventName, false);
+    /**
+     * @param qualifications todas las de la persona, tambien las caducadas: el consumidor decide por la
+     *                       fecha. Viajan siempre enteras, porque quien guarda una instantanea sustituye la
+     *                       lista que tenia por la que llega.
+     */
+    public static DomainEvent person(Person person, List<PersonQualification> qualifications, String eventName) {
+        return person(person, qualifications, eventName, false);
     }
 
-    public static DomainEvent person(Person person, String eventName, boolean republished) {
+    public static DomainEvent person(Person person, List<PersonQualification> qualifications, String eventName, boolean republished) {
         Map<String, Object> values = new LinkedHashMap<>();
         values.put("code", person.getCode());
         values.put("firstName", person.getFirstName());
@@ -64,7 +76,22 @@ public final class ResourcesEvents {
         values.put("active", person.getActive());
         values.put("version", person.getVersion());
         values.put("republished", republished);
+        values.put("qualifications", qualifications.stream()
+                .sorted(Comparator.comparing((PersonQualification qualification) -> qualification.getQualificationType().getCode()))
+                .map(ResourcesEvents::qualificationRef)
+                .toList());
         return new DomainEvent(PERSON, id(person.getId()), eventName, values);
+    }
+
+    /** Lo que un consumidor necesita de una cualificacion para decidir si vale en una fecha: su codigo y hasta cuando. */
+    private static Map<String, Object> qualificationRef(PersonQualification qualification) {
+        QualificationType type = qualification.getQualificationType();
+        Map<String, Object> ref = new LinkedHashMap<>();
+        ref.put("code", type.getCode());
+        ref.put("kind", name(type.getKind()));
+        ref.put("drivingLicence", name(type.getDrivingLicence()));
+        ref.put("expiresOn", date(qualification.getExpiresOn()));
+        return ref;
     }
 
     // -------------------------------------------------------------------------------- teams
@@ -173,5 +200,10 @@ public final class ResourcesEvents {
 
     private static String name(Enum<?> value) {
         return value == null ? null : value.name();
+    }
+
+    /** Una fecha viaja como texto ISO ({@code 2027-03-31}), igual la serialice quien la serialice. */
+    private static String date(LocalDate value) {
+        return value == null ? null : value.toString();
     }
 }

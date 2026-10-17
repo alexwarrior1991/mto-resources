@@ -10,8 +10,10 @@ import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleMobil
 import com.alejandro.mtoresources.infrastructure.persistence.entity.WorkDiscipline;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.EnumSet;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -167,5 +169,34 @@ class DomainModelTest {
                                               Set<VehicleCapability> capabilities) {
         return new FleetRules.TypeShape(mobility, category, railGear, railGear, false, false, false, capabilities,
                 false, false, false, false);
+    }
+
+    // --------------------------------------------------------------------- caducidades
+
+    @Test
+    void somethingExpiresTheDayAfterItsExpiryDateAndIsWarnedAboutWithinTheWarningDays() {
+        LocalDate today = LocalDate.parse("2026-10-17");
+        assertEquals(0, ExpiryRules.daysLeft(today, today));
+        assertEquals(-1, ExpiryRules.daysLeft(today.minusDays(1), today));
+        assertFalse(ExpiryRules.isExpired(today, today), "It is still valid on its expiry date");
+        assertTrue(ExpiryRules.isExpired(today.minusDays(1), today));
+        assertFalse(ExpiryRules.isExpired(null, today), "Without an expiry it never expires");
+
+        assertEquals(Optional.of(ExpiryRules.Stage.EXPIRING), ExpiryRules.stage(today, today, 30));
+        assertEquals(Optional.of(ExpiryRules.Stage.EXPIRING), ExpiryRules.stage(today.plusDays(30), today, 30));
+        assertEquals(Optional.empty(), ExpiryRules.stage(today.plusDays(31), today, 30));
+        assertEquals(Optional.of(ExpiryRules.Stage.EXPIRED), ExpiryRules.stage(today.minusDays(1), today, 30));
+        assertEquals(Optional.empty(), ExpiryRules.stage(null, today, 30));
+    }
+
+    @Test
+    void anExpiryIsNeverBeforeTheIssueAndTheValidityOfTheTypeGivesTheMissingOne() {
+        LocalDate issued = LocalDate.parse("2026-01-15");
+        assertTrue(ExpiryRules.datesViolation("A qualification", issued, issued.minusDays(1)).isPresent());
+        assertTrue(ExpiryRules.datesViolation("A qualification", issued, issued).isEmpty());
+        assertTrue(ExpiryRules.datesViolation("A qualification", null, issued).isEmpty());
+        assertEquals(Optional.of(LocalDate.parse("2029-01-15")), ExpiryRules.defaultExpiry(issued, 36));
+        assertEquals(Optional.empty(), ExpiryRules.defaultExpiry(null, 36));
+        assertEquals(Optional.empty(), ExpiryRules.defaultExpiry(issued, null));
     }
 }

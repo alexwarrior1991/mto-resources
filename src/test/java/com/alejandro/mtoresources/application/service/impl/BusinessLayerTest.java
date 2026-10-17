@@ -25,25 +25,36 @@ import com.alejandro.mtoresources.application.dto.person.MeResponse;
 import com.alejandro.mtoresources.application.dto.person.PersonRequest;
 import com.alejandro.mtoresources.application.dto.person.PersonResponse;
 import com.alejandro.mtoresources.application.dto.person.PersonUpdateRequest;
+import com.alejandro.mtoresources.application.dto.qualification.PersonQualificationRequest;
+import com.alejandro.mtoresources.application.dto.qualification.PersonQualificationResponse;
+import com.alejandro.mtoresources.application.dto.qualification.PersonQualificationUpdateRequest;
+import com.alejandro.mtoresources.application.dto.qualification.QualificationTypeRequest;
+import com.alejandro.mtoresources.application.dto.qualification.QualificationTypeResponse;
+import com.alejandro.mtoresources.application.dto.qualification.QualificationTypeUpdateRequest;
 import com.alejandro.mtoresources.application.exception.DuplicateCodeException;
 import com.alejandro.mtoresources.application.exception.FleetRuleException;
 import com.alejandro.mtoresources.application.exception.NotFoundException;
 import com.alejandro.mtoresources.application.exception.OrganizationRuleException;
+import com.alejandro.mtoresources.application.exception.QualificationRuleException;
 import com.alejandro.mtoresources.application.exception.StaleVersionException;
 import com.alejandro.mtoresources.application.exception.TooManyOperationsException;
 import com.alejandro.mtoresources.application.exception.ValidationException;
 import com.alejandro.mtoresources.application.service.BudgetedOperations;
 import com.alejandro.mtoresources.application.service.DomainEventPublisher;
 import com.alejandro.mtoresources.application.service.OrganizationUnitService;
+import com.alejandro.mtoresources.application.service.PersonQualificationService;
 import com.alejandro.mtoresources.application.service.PersonService;
+import com.alejandro.mtoresources.application.service.QualificationTypeService;
 import com.alejandro.mtoresources.application.service.RepublishService;
 import com.alejandro.mtoresources.application.service.VehicleLocationService;
 import com.alejandro.mtoresources.application.service.VehicleService;
 import com.alejandro.mtoresources.application.service.VehicleTypeService;
 import com.alejandro.mtoresources.configuration.AuditActorResolver;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.DrivingLicence;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnitKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonCategory;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonEmployer;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.QualificationKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.RailGearType;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleAttachment;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCapability;
@@ -77,6 +88,8 @@ import org.springframework.test.context.DynamicPropertySource;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -113,6 +126,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BusinessLayerTest extends PostgreSQLTestContainer {
 
     private static final UUID MAINTENANCE_DEPARTMENT = UUID.fromString("0195b000-0000-7000-8000-000000000002");
+    /** Los tipos de cualificacion sembrados por V8. */
+    private static final UUID LICENCE_B = UUID.fromString("0195b000-0000-7000-8000-000000000101");
+    private static final UUID LICENCE_CE = UUID.fromString("0195b000-0000-7000-8000-000000000103");
+    private static final UUID RAIL_DRIVER = UUID.fromString("0195b000-0000-7000-8000-000000000104");
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -136,6 +153,10 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
     private OrganizationUnitService units;
     @Autowired
     private VehicleTypeService types;
+    @Autowired
+    private QualificationTypeService qualificationTypes;
+    @Autowired
+    private PersonQualificationService personQualifications;
     @Autowired
     private VehicleService vehicles;
     @Autowired
@@ -711,6 +732,166 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
                 handler("MTO-MAINTENANCE", "Shift", handled))));
     }
 
+    // ------------------------------------------------------------------- cualificaciones
+
+    @Test
+    void theCatalogueOfQualificationsBringsWhatTheModelsAskForAndALicenceSaysWhichOne() {
+        QualificationTypeResponse railDriver = qualificationTypes.findById(RAIL_DRIVER);
+        assertEquals("RAIL-DRIVER", railDriver.code());
+        assertEquals(QualificationKind.VEHICLE_OPERATION, railDriver.kind());
+        assertEquals(Set.of("LIC-B", "LIC-C", "LIC-CE"), qualificationTypes.search("LIC-", QualificationKind.DRIVING_LICENCE, true,
+                PageRequest.of(0, 50)).content().stream().map(QualificationTypeResponse::code)
+                .filter(code -> code.matches("LIC-(B|C|CE)")).collect(Collectors.toSet()));
+        assertEquals(DrivingLicence.C_E, qualificationTypes.findById(LICENCE_CE).drivingLicence());
+
+        assertThrows(ValidationException.class, () -> qualificationTypes.create(new QualificationTypeRequest("Q" + random(), "Licence",
+                QualificationKind.DRIVING_LICENCE, null, null, null)), "A licence says which one");
+        assertThrows(ValidationException.class, () -> qualificationTypes.create(new QualificationTypeRequest("Q" + random(), "First aid",
+                QualificationKind.SAFETY, DrivingLicence.B, null, null)), "Only a licence carries one");
+
+        String code = "q" + random();
+        QualificationTypeResponse licence = qualificationTypes.create(new QualificationTypeRequest(code, " Tractor licence ",
+                QualificationKind.DRIVING_LICENCE, DrivingLicence.C_E, 120, "Agricultural tractors"));
+        assertEquals(code.toUpperCase(Locale.ROOT), licence.code());
+        assertEquals("Tractor licence", licence.name());
+        DuplicateCodeException duplicate = assertThrows(DuplicateCodeException.class, () -> qualificationTypes.create(
+                new QualificationTypeRequest(code, "Again", QualificationKind.OTHER, null, null, null)));
+        assertEquals("QTY-409", new GlobalExceptionHandler().handleDuplicateCode(duplicate, new MockHttpServletRequest()).getBody().errorCode());
+
+        QualificationTypeResponse cleared = qualificationTypes.patch(licence.id(), new MergePatch<>(
+                new QualificationTypeUpdateRequest(null, null, null, null, null, null, licence.version()), Set.of("validityMonths", "description")));
+        assertNull(cleared.validityMonths());
+        assertNull(cleared.description());
+        assertThrows(ValidationException.class, () -> qualificationTypes.patch(licence.id(), new MergePatch<>(
+                new QualificationTypeUpdateRequest(null, null, null, null, null, null, null), Set.of("name"))));
+        // Un PUT no sabe vaciar: dejar de ser un permiso quita el permiso sin decirlo.
+        QualificationTypeResponse other = qualificationTypes.update(licence.id(), new QualificationTypeUpdateRequest(null,
+                QualificationKind.OTHER, null, null, null, null, cleared.version()));
+        assertEquals(QualificationKind.OTHER, other.kind());
+        assertNull(other.drivingLicence());
+        assertThrows(StaleVersionException.class, () -> qualificationTypes.update(licence.id(), new QualificationTypeUpdateRequest("Late",
+                null, null, null, null, null, cleared.version())));
+
+        qualificationTypes.deactivate(licence.id());
+        assertFalse(qualificationTypes.findById(licence.id()).active());
+        assertEquals("QTY-404", new GlobalExceptionHandler().handleNotFound(assertThrows(NotFoundException.class,
+                () -> qualificationTypes.findById(UUID.randomUUID())), new MockHttpServletRequest()).getBody().errorCode());
+    }
+
+    @Test
+    void aPersonHasOneQualificationOfEachTypeAndEveryChangePublishesThePersonWithAllOfThem() {
+        PersonResponse person = person(PersonCategory.TEAM_LEADER);
+        QualificationTypeResponse firstAid = qualificationType(QualificationKind.SAFETY, null, null);
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        events.clear();
+
+        PersonQualificationResponse driver = personQualifications.create(person.id(), new PersonQualificationRequest(RAIL_DRIVER,
+                " RD-001 ", today.minusYears(1), today.plusDays(100), null));
+        assertEquals("RAIL-DRIVER", driver.qualificationType().code());
+        assertEquals("RD-001", driver.reference());
+        assertEquals(person.id(), driver.personId());
+        assertFalse(driver.expired());
+        DomainEvent created = events.only("person.updated");
+        assertEquals(person.id().toString(), created.entityId());
+        assertEquals(List.of(qualificationValues("RAIL-DRIVER", "VEHICLE_OPERATION", null, today.plusDays(100))),
+                created.values().get("qualifications"));
+
+        events.clear();
+        PersonQualificationResponse aid = personQualifications.create(person.id(), new PersonQualificationRequest(firstAid.id(), null,
+                today.minusYears(2), today.minusDays(1), "Renewal booked"));
+        assertTrue(aid.expired(), "Expired from the day after its expiry");
+        List<?> both = (List<?>) events.only("person.updated").values().get("qualifications");
+        assertEquals(List.of(firstAid.code(), "RAIL-DRIVER").stream().sorted().toList(),
+                both.stream().map(item -> ((Map<?, ?>) item).get("code")).toList(), "By code, the expired one too");
+        assertEquals(List.of(firstAid.code(), "RAIL-DRIVER").stream().sorted().toList(),
+                personQualifications.findAll(person.id()).stream().map(item -> item.qualificationType().code()).toList());
+
+        QualificationRuleException twice = assertThrows(QualificationRuleException.class, () -> personQualifications.create(person.id(),
+                new PersonQualificationRequest(RAIL_DRIVER, null, null, null, null)));
+        assertEquals("QUA-001", new GlobalExceptionHandler().handleStateConflict(twice, new MockHttpServletRequest()).getBody().errorCode());
+        QualificationTypeResponse retired = qualificationType(QualificationKind.OTHER, null, null);
+        qualificationTypes.deactivate(retired.id());
+        assertThrows(QualificationRuleException.class, () -> personQualifications.create(person.id(),
+                new PersonQualificationRequest(retired.id(), null, null, null, null)), "No new one of a retired type");
+        assertThrows(ValidationException.class, () -> personQualifications.create(person.id(),
+                new PersonQualificationRequest(LICENCE_B, null, today, today.minusDays(1), null)), "It expires before it was issued");
+        assertThrows(NotFoundException.class, () -> personQualifications.create(UUID.randomUUID(),
+                new PersonQualificationRequest(LICENCE_B, null, null, null, null)));
+
+        // Renovarla es cambiar su caducidad; sin caducidad, no caduca.
+        events.clear();
+        PersonQualificationResponse renewed = personQualifications.patch(person.id(), aid.id(), MergePatch.of(
+                new PersonQualificationUpdateRequest(null, today, today.plusYears(3), null, aid.version())));
+        assertFalse(renewed.expired());
+        assertEquals(1, events.names().size());
+        assertThrows(StaleVersionException.class, () -> personQualifications.patch(person.id(), aid.id(), MergePatch.of(
+                new PersonQualificationUpdateRequest("X", null, null, null, aid.version()))));
+        PersonQualificationResponse forever = personQualifications.patch(person.id(), aid.id(), new MergePatch<>(
+                new PersonQualificationUpdateRequest(null, null, null, null, renewed.version()), Set.of("expiresOn", "notes")));
+        assertNull(forever.expiresOn());
+        assertNull(forever.notes());
+        assertTrue(((List<?>) events.published.getLast().values().get("qualifications")).stream()
+                .anyMatch(item -> ((Map<?, ?>) item).get("code").equals(firstAid.code()) && ((Map<?, ?>) item).get("expiresOn") == null));
+
+        PersonResponse other = person(PersonCategory.WORKER);
+        NotFoundException elsewhere = assertThrows(NotFoundException.class, () -> personQualifications.patch(other.id(), aid.id(),
+                MergePatch.of(new PersonQualificationUpdateRequest("X", null, null, null, null))));
+        assertEquals("QUA-404", new GlobalExceptionHandler().handleNotFound(elsewhere, new MockHttpServletRequest()).getBody().errorCode());
+
+        // Cambiar la persona tambien cuenta sus cualificaciones.
+        events.clear();
+        people.patch(person.id(), MergePatch.of(new PersonUpdateRequest("Renamed", null, null, null, null, null, null, null, null, null,
+                null)));
+        assertEquals(2, ((List<?>) events.only("person.updated").values().get("qualifications")).size());
+
+        // Quitar la que se dio por error: se borra, el historial la guarda y el evento ya no la lleva.
+        events.clear();
+        personQualifications.delete(person.id(), driver.id());
+        assertEquals(List.of(firstAid.code()), ((List<?>) events.only("person.updated").values().get("qualifications")).stream()
+                .map(item -> ((Map<?, ?>) item).get("code")).toList());
+        assertEquals(1, personQualifications.findAll(person.id()).size());
+        assertEquals(List.of(0, 2), jdbc.queryForList("select revtype from person_qualification_aud where id = ? order by rev",
+                Integer.class, driver.id()), "Created and deleted");
+        assertEquals(today.plusDays(100), jdbc.queryForObject("select expires_on from person_qualification_aud where id = ? and revtype = 2",
+                LocalDate.class, driver.id()), "The deletion keeps what it deleted");
+        assertEquals(3, jdbc.queryForObject("select count(*) from person_qualification_aud where id = ?", Integer.class, aid.id()),
+                "Created and changed twice");
+    }
+
+    @Test
+    void theValidityOfATypeGivesTheExpiryOfAQualificationThatDoesNotSayIt() {
+        PersonResponse person = person(PersonCategory.WORKER);
+        QualificationTypeResponse crane = qualificationType(QualificationKind.VEHICLE_OPERATION, null, 24);
+        QualificationTypeResponse mewp = qualificationType(QualificationKind.VEHICLE_OPERATION, null, 36);
+        LocalDate issued = LocalDate.parse("2026-02-10");
+
+        assertEquals(LocalDate.parse("2028-02-10"), personQualifications.create(person.id(),
+                new PersonQualificationRequest(crane.id(), null, issued, null, null)).expiresOn());
+        assertNull(personQualifications.create(person.id(), new PersonQualificationRequest(mewp.id(), null, null, null, null)).expiresOn(),
+                "Without its issue there is nothing to count from");
+    }
+
+    @Test
+    void changingTheKindOfAQualificationTypeRepublishesWhoHoldsIt() {
+        QualificationTypeResponse type = qualificationType(QualificationKind.SAFETY, null, null);
+        PersonResponse first = person(PersonCategory.WORKER);
+        PersonResponse second = person(PersonCategory.WORKER);
+        personQualifications.create(first.id(), new PersonQualificationRequest(type.id(), null, null, null, null));
+        personQualifications.create(second.id(), new PersonQualificationRequest(type.id(), null, null, null, null));
+        events.clear();
+
+        QualificationTypeResponse renamed = qualificationTypes.patch(type.id(), MergePatch.of(new QualificationTypeUpdateRequest("Renamed",
+                null, null, null, null, null, null)));
+        assertEquals(List.of(), events.names(), "The name does not travel in their events");
+
+        qualificationTypes.patch(type.id(), MergePatch.of(new QualificationTypeUpdateRequest(null, QualificationKind.OTHER, null, null,
+                null, null, renamed.version())));
+        assertEquals(Set.of(first.id().toString(), second.id().toString()), events.published.stream()
+                .filter(event -> event.entityName().equals("person")).map(DomainEvent::entityId).collect(Collectors.toSet()));
+        assertTrue(events.published.stream().allMatch(event -> event.eventName().equals("updated")
+                && ((List<?>) event.values().get("qualifications")).equals(List.of(qualificationValues(type.code(), "OTHER", null, null)))));
+    }
+
     // ------------------------------------------------------------------------ historial
 
     @Test
@@ -871,6 +1052,20 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
     private PersonResponse person(PersonCategory category) {
         String suffix = random();
         return people.create(new PersonRequest("P" + suffix, "Test", category, null, "user." + suffix, null, null, null, null));
+    }
+
+    private QualificationTypeResponse qualificationType(QualificationKind kind, DrivingLicence licence, Integer validityMonths) {
+        return qualificationTypes.create(new QualificationTypeRequest("Q" + random(), "Qualification", kind, licence, validityMonths, null));
+    }
+
+    /** Una cualificacion como viaja en el evento de su persona. */
+    private static Map<String, Object> qualificationValues(String code, String kind, String drivingLicence, LocalDate expiresOn) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("code", code);
+        values.put("kind", kind);
+        values.put("drivingLicence", drivingLicence);
+        values.put("expiresOn", expiresOn == null ? null : expiresOn.toString());
+        return values;
     }
 
     private List<UUID> linemen(int count) {

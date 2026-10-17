@@ -35,6 +35,15 @@ public interface PersonRepository extends JpaRepository<Person, UUID>, JpaSpecif
     @Query("select count(p) > 0 from Person p where p.keycloakUserId = :keycloakUserId and (:id is null or p.id <> :id)")
     boolean existsKeycloakUserId(@Param("keycloakUserId") String keycloakUserId, @Param("id") UUID id);
 
+    /**
+     * La persona con su fila bloqueada hasta el final de la transaccion: lo que serializa los cambios de
+     * sus cualificaciones, que cuentan todas en su evento, para que el ultimo {@code person.updated} sea
+     * el del ultimo commit y no deje fuera la de otra transaccion.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from Person p where p.id = :id")
+    Optional<Person> findByIdForUpdate(@Param("id") UUID id);
+
     /** Bloqueadas en orden de id, antes de republicar su evento: el orden de las marcas de agua es el de los commits. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from Person p where p.id in :ids order by p.id")

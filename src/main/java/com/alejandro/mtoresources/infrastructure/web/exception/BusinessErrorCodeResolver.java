@@ -5,6 +5,7 @@ import com.alejandro.mtoresources.application.exception.DuplicateCodeException;
 import com.alejandro.mtoresources.application.exception.FleetRuleException;
 import com.alejandro.mtoresources.application.exception.NotFoundException;
 import com.alejandro.mtoresources.application.exception.OrganizationRuleException;
+import com.alejandro.mtoresources.application.exception.QualificationRuleException;
 import com.alejandro.mtoresources.application.exception.StaleVersionException;
 import com.alejandro.mtoresources.application.exception.TooManyOperationsException;
 import com.alejandro.mtoresources.application.exception.ValidationException;
@@ -23,6 +24,8 @@ final class BusinessErrorCodeResolver {
             Map.entry("Vehicle", "VEH"),
             Map.entry("Vehicle type", "VTY"),
             Map.entry("Parking site", "PRK"),
+            Map.entry("Qualification type", "QTY"),
+            Map.entry("Person qualification", "QUA"),
             Map.entry("Background operation", "OPS")
     );
 
@@ -35,6 +38,7 @@ final class BusinessErrorCodeResolver {
             case DuplicateCodeException duplicate -> aggregateCode(duplicate.getAggregate(), "409", "APP-409");
             case OrganizationRuleException ignored -> "UNI-001";
             case FleetRuleException ignored -> "VEH-001";
+            case QualificationRuleException ignored -> "QUA-001";
             case TooManyOperationsException ignored -> "OPS-429";
             case StaleVersionException ignored -> "CON-001";
             case ValidationException ignored -> "VAL-001";

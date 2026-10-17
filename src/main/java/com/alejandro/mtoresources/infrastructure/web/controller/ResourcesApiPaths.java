@@ -9,6 +9,8 @@ public final class ResourcesApiPaths {
     public static final String ME = BASE + "/me";
     public static final String UNITS = BASE + "/units";
     public static final String PARKING_SITES = BASE + "/parking-sites";
+    public static final String QUALIFICATION_TYPES = BASE + "/qualification-types";
+    public static final String PERSON_QUALIFICATIONS = PEOPLE + "/{personId}/qualifications";
     public static final String VEHICLE_TYPES = BASE + "/vehicle-types";
     public static final String VEHICLES = BASE + "/vehicles";
     public static final String OPERATIONS = BASE + "/operations";

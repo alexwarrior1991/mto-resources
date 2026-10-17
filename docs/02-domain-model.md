@@ -12,6 +12,27 @@ would drop below 2.
 Category ranks: `WORKER` 1, `TEAM_LEADER` 2, `SUPERVISOR` 3, `CHIEF_SUPERVISOR` 4, `CHIEF_MAINTENANCE`
 and `CHIEF_CONSTRUCTION` 5, `PROJECT_MANAGER` 6.
 
+## Qualifications
+
+What someone is qualified for, with its dates only (no diagnosis, no copy of any document): a driving
+licence, the qualification to drive a rail auxiliary vehicle or to operate a road-rail machine, work near
+live equipment, first aid, the medical fitness date. `QualificationType` is the catalogue: a code (upper
+case, never changes: it is what travels in the events), a name, a kind (`DRIVING_LICENCE`,
+`VEHICLE_OPERATION`, `SAFETY`, `OTHER`), the driving licence (`B`, `C`, `C_E`) if and only if it is a
+`DRIVING_LICENCE`, and an optional default validity in months. Seeded: `LIC-B`, `LIC-C`, `LIC-CE`,
+`RAIL-DRIVER` (rail auxiliary vehicle driver) and `RR-OPERATOR` (road-rail machine operator). A type is
+retired, never deleted: what people already have stays, but no new one is given (409 `QUA-001`).
+
+`PersonQualification` is one of a person, **one per type**: renewing it is changing its `expiresOn`. It
+has a reference (the number of the licence or certificate), `issuedOn`, `expiresOn` (none: it does not
+expire; never before `issuedOn`, 400 `VAL-001`) and notes. Without `expiresOn`, a new one takes
+`issuedOn` plus the validity of its type, if the type has one. One given by mistake is deleted (Envers
+keeps the deletion). An expiry date is the last day it is valid: it is **expired** from the next day
+(`ExpiryRules`, «today» in the clock of the service, UTC).
+
+Who decides that something expired does not enter a shift is `mto-maintenance`, with what the events
+say: every person event carries all their qualifications, the expired ones too.
+
 ## The organization tree
 
 `OrganizationUnit`: `PROJECT` (level 1) → `DEPARTMENT` (2) → `CHIEF_SUPERVISION` (3) → `SUPERVISION`

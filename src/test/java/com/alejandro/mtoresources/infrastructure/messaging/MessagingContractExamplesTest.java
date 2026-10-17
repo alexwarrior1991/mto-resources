@@ -8,10 +8,14 @@ import com.alejandro.mtoresources.infrastructure.messaging.outbox.AsynchronousMe
 import com.alejandro.mtoresources.infrastructure.messaging.outbox.AsynchronousMessageHashService;
 import com.alejandro.mtoresources.infrastructure.messaging.outbox.MessageContextResolver;
 import com.alejandro.mtoresources.infrastructure.messaging.rabbitmq.ResourcesRabbitMqNames;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.DrivingLicence;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnit;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnitKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Person;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonCategory;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonQualification;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.QualificationKind;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.QualificationType;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.RailGearType;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Vehicle;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCapability;
@@ -32,6 +36,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.LinkedHashSet;
@@ -71,8 +76,9 @@ class MessagingContractExamplesTest {
 
     @Test
     void personCreated() throws IOException {
+        // Una persona nueva aun no tiene cualificaciones: se le dan despues.
         check("person-created.json", "b0000000-0000-4000-8000-000000000001", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.person(leader(), ResourcesEvents.CREATED));
+                ResourcesEvents.person(leader(), List.of(), ResourcesEvents.CREATED));
     }
 
     @Test
@@ -80,8 +86,12 @@ class MessagingContractExamplesTest {
         Person person = leader();
         person.setCategory(PersonCategory.SUPERVISOR);
         ReflectionTestUtils.setField(person, "version", 1L);
+        // Llegan en cualquier orden y viajan por codigo; todas, tambien las caducadas.
+        List<PersonQualification> qualifications = List.of(
+                qualification(person, railDriver(), "a1000000-0000-4000-8000-000000000001", LocalDate.parse("2027-03-31")),
+                qualification(person, licenceC(), "a1000000-0000-4000-8000-000000000002", LocalDate.parse("2031-06-14")));
         check("person-updated.json", "b0000000-0000-4000-8000-000000000002", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.person(person, ResourcesEvents.UPDATED));
+                ResourcesEvents.person(person, qualifications, ResourcesEvents.UPDATED));
     }
 
     @Test
@@ -89,8 +99,10 @@ class MessagingContractExamplesTest {
         Person person = lineman("c0000000-0000-4000-8000-000000000012", "PER-000012", "Avi", "Levi", null);
         person.setActive(false);
         ReflectionTestUtils.setField(person, "version", 2L);
+        // Una que no caduca viaja con expiresOn nulo.
         check("person-deactivated.json", "b0000000-0000-4000-8000-000000000003", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.person(person, ResourcesEvents.DEACTIVATED));
+                ResourcesEvents.person(person, List.of(qualification(person, licenceB(), "a1000000-0000-4000-8000-000000000003", null)),
+                        ResourcesEvents.DEACTIVATED));
     }
 
     // -------------------------------------------------------------------------------- teams
@@ -194,6 +206,33 @@ class MessagingContractExamplesTest {
         Vehicle vehicle = Vehicle.builder().code("RR-07").name("Unimog 7").type(type).registrationPlate("12-345-67").build();
         entity(vehicle, "f0000000-0000-4000-8000-000000000007");
         return vehicle;
+    }
+
+    private static QualificationType railDriver() {
+        QualificationType type = QualificationType.builder().code("RAIL-DRIVER").name("Rail auxiliary vehicle driver")
+                .kind(QualificationKind.VEHICLE_OPERATION).build();
+        entity(type, "0195b000-0000-7000-8000-000000000104");
+        return type;
+    }
+
+    private static QualificationType licenceC() {
+        QualificationType type = QualificationType.builder().code("LIC-C").name("Driving licence C").kind(QualificationKind.DRIVING_LICENCE)
+                .drivingLicence(DrivingLicence.C).build();
+        entity(type, "0195b000-0000-7000-8000-000000000102");
+        return type;
+    }
+
+    private static QualificationType licenceB() {
+        QualificationType type = QualificationType.builder().code("LIC-B").name("Driving licence B").kind(QualificationKind.DRIVING_LICENCE)
+                .drivingLicence(DrivingLicence.B).build();
+        entity(type, "0195b000-0000-7000-8000-000000000101");
+        return type;
+    }
+
+    private static PersonQualification qualification(Person person, QualificationType type, String id, LocalDate expiresOn) {
+        PersonQualification qualification = PersonQualification.builder().person(person).qualificationType(type).expiresOn(expiresOn).build();
+        entity(qualification, id);
+        return qualification;
     }
 
     private static void entity(Object entity, String id) {

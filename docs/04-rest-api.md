@@ -11,7 +11,7 @@ stable `errorCode` and the request's `correlationId` — the same shapes as `mto
 | `GET`/`HEAD` of everything | `resources-read` |
 | `POST /vehicles/{id}/locations` | `resources-location-write` (its matcher goes first) |
 | Writes of `/vehicles/**`, `/vehicle-types/**` | `resources-fleet-write` |
-| Writes of `/people/**`, `/units/**`, `/parking-sites/**` | `resources-write` |
+| Writes of `/people/**` (their qualifications too), `/units/**`, `/parking-sites/**`, `/qualification-types/**` | `resources-write` |
 | `DELETE` of anything, and `PUT`/`PATCH` with `active=false` (`@PreAuthorize`) | `resources-delete` |
 | `/actuator/**` | `ops-metrics` to read, `ops-write` for `POST`/`DELETE` |
 | Anything else under the API | denied: a new resource declares its permission or does not exist |
@@ -23,6 +23,8 @@ No role implies another (`ApiAuthorizationRulesTest`).
 | Route | What |
 |---|---|
 | `GET/POST /people`, `GET/PUT/PATCH/DELETE /people/{id}`, `GET /people/{id}/revisions` | People. Search by `search` (code, name, username, employee number), `category` (repeatable: any of them, as the crew pickers ask for `WORKER` and `TEAM_LEADER` at once), `unitId` (its head and open linemen), `active` |
+| `GET/POST /qualification-types`, `GET/PUT/PATCH/DELETE /qualification-types/{id}` | The catalogue of qualification types. Search by `search` (code, name), `kind`, `active`. `drivingLicence` if and only if `kind` is `DRIVING_LICENCE` (another kind drops it); the code never changes; `DELETE` retires it. Changing its kind or licence republishes the people who hold it |
+| `GET/POST /people/{personId}/qualifications`, `PATCH/DELETE /people/{personId}/qualifications/{qualificationId}` | The qualifications of a person, the whole list by type code (`expired`: its expiry is before today). One per type of an active type (409 `QUA-001`); without `expiresOn`, `issuedOn` plus the `validityMonths` of the type; `PATCH` (merge-patch only) renews it or empties anything; `DELETE` is a physical delete. Every change publishes `person.updated` |
 | `GET /me` | The person of the token, their units (`HEAD` or `LINEMAN`) and the EPs of those units and of everything under them. 404 `PER-404` when no record has the username |
 | `GET/POST /units`, `GET /units/tree`, `GET/PUT/PATCH/DELETE /units/{id}`, `GET /units/{id}/revisions` | The organization tree. A team is created complete (`headPersonId` + 2 to 6 `memberPersonIds`) |
 | `GET/PUT/POST /units/{id}/members`, `POST /units/{id}/members/{personId}/leave` | The linemen of a team: read (`includeFormer`), replace all at once, add one, one leaves |
@@ -61,9 +63,10 @@ route from the id in the body, like with the other services.
 
 | Code | When |
 |---|---|
-| `VAL-001`, `REQ-400`, `REQ-VALIDATION` | A request that is malformed or breaks a rule of its own content (a team without leader, 1 or 7 linemen, an incoherent model, a future `observedAt`) |
-| `PER-404`, `UNI-404`, `VEH-404`, `VTY-404`, `PRK-404`, `OPS-404` | Not found, also the history (`/revisions`) of something without revisions: the code is the aggregate's, never `APP-404` |
-| `PER-409`, `UNI-409`, `VEH-409`, `VTY-409`, `PRK-409` | A repeated code, username, employee number, plate or rail number |
+| `VAL-001`, `REQ-400`, `REQ-VALIDATION` | A request that is malformed or breaks a rule of its own content (a team without leader, 1 or 7 linemen, an incoherent model, a future `observedAt`, an expiry before the issue, a licence on a type that is not a `DRIVING_LICENCE`) |
+| `PER-404`, `UNI-404`, `VEH-404`, `VTY-404`, `PRK-404`, `QTY-404`, `QUA-404`, `OPS-404` | Not found, also the history (`/revisions`) of something without revisions: the code is the aggregate's, never `APP-404`. A qualification of another person is `QUA-404` |
+| `PER-409`, `UNI-409`, `VEH-409`, `VTY-409`, `PRK-409`, `QTY-409` | A repeated code, username, employee number, plate or rail number |
+| `QUA-001` | A qualification rule: the person already has one of that type (renew it instead), or the type is retired |
 | `UNI-001` | An organization rule: the crew limits, a parent of the wrong level, a head without the category, a person already in another team, a unit with active units under it |
 | `VEH-001` | A fleet rule: where a vehicle can be, towing and carrying, a retired vehicle or model, the default vehicle of an active team |
 | `CON-001` | A stale version |

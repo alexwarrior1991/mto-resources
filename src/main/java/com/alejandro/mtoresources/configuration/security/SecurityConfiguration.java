@@ -115,11 +115,13 @@ public class SecurityConfiguration {
                                 API + "/vehicle-types", API + "/vehicle-types/**").hasRole(SecurityRoles.RESOURCES_FLEET_WRITE);
                     }
 
-                    // Personal y organizacion: personas, unidades, linemen y sitios de aparcamiento.
+                    // Personal y organizacion: personas (y sus cualificaciones), unidades, linemen, sitios de
+                    // aparcamiento y el catalogo de tipos de cualificacion.
                     for (HttpMethod method : WRITE_METHODS) {
                         authorize.requestMatchers(method, API + "/people", API + "/people/**",
                                 API + "/units", API + "/units/**",
-                                API + "/parking-sites", API + "/parking-sites/**").hasRole(SecurityRoles.RESOURCES_WRITE);
+                                API + "/parking-sites", API + "/parking-sites/**",
+                                API + "/qualification-types", API + "/qualification-types/**").hasRole(SecurityRoles.RESOURCES_WRITE);
                     }
 
                     authorize.requestMatchers(HttpMethod.DELETE, API + "/**").hasRole(SecurityRoles.RESOURCES_DELETE);

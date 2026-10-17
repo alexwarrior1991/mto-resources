@@ -16,6 +16,7 @@ Two layers, answering different questions, both resolving the actor through `Aud
 | `OrganizationUnit` | with its EPs (`organization_unit_execution_package_aud`) |
 | `TeamMember` | the linemen; a membership is closed, never deleted |
 | `Vehicle` | its model is read as it is now (`NOT_AUDITED` relation): models are a catalogue |
+| `PersonQualification` | its type is read as it is now (`NOT_AUDITED`); a deleted one keeps its data in the `DEL` revision (`store_data_at_delete`); the expiry marks are `@NotAudited` |
 
 The seeded project and department have a `BASELINE` revision (`V7`): without it, reading the history
 of a unit under them would fail looking for its parent in `organization_unit_aud`.
@@ -24,7 +25,7 @@ of a unit under them would fail looking for its parent in `organization_unit_aud
 
 | Entity | Why |
 |---|---|
-| `VehicleType`, `ParkingSite` | catalogues of rare change |
+| `VehicleType`, `ParkingSite`, `QualificationType` | catalogues of rare change |
 | `VehicleLocationEvent` | it is already the append-only history of the locations |
 | `VehiclePosition` | written only with native SQL, which Envers cannot see |
 | `InboxMessage`, `OutboxMessage`, `BackgroundOperation` | their history is themselves |

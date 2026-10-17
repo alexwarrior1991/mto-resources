@@ -20,6 +20,7 @@ columns without a foreign key.
 | `V5` | `person`, `organization_unit`, `organization_unit_execution_package`, `team_member` and their `_aud` |
 | `V6` | `vehicle_type` (+ `vehicle_type_capability`), `parking_site`, `vehicle` (+ `_aud`), `vehicle_location_event`, `vehicle_position` |
 | `V7` | The seed: project `MTO` and department `MNT`, with a `BASELINE` revision |
+| `V8` | `qualification_type` (with its seeds), `person_qualification`, `vehicle_document`, `instrument` and their `_aud`; `vehicle_type.required_driver_qualification_type_id` with its backfill |
 
 ## People and organization (`V5`)
 
@@ -57,6 +58,29 @@ Enums: `vehicle_mobility`, `vehicle_category` (19 values), `vehicle_power`, `rai
 `INSERT ... SELECT ... FROM vehicle_location_event ... ON CONFLICT (vehicle_id) DO UPDATE ... WHERE
 vehicle_position.observed_at < excluded.observed_at`. The watermark is inside the statement, never
 read-then-write.
+
+## Qualifications, documents and instruments (`V8`)
+
+| Table | Key columns | Constraints and indexes |
+|---|---|---|
+| `qualification_type` | `code` (upper case, 32), `name`, `kind`, `driving_licence`, `validity_months`, `description`, `active`, `version` | `code` unique and upper; `driving_licence` if and only if `kind = 'DRIVING_LICENCE'`; `validity_months > 0`. Seeded with fixed ids: `LIC-B`, `LIC-C`, `LIC-CE`, `RAIL-DRIVER`, `RR-OPERATOR` |
+| `person_qualification` | `person_id`, `qualification_type_id`, `reference` (60), `issued_on`, `expires_on` (null: does not expire), `notes` (500), `expiring_notified_for`, `expired_notified_for`, `version` | **one per type** (`uq_person_qualification (person_id, qualification_type_id)`); `expires_on >= issued_on`; index on `expires_on` |
+| `vehicle_document` | `vehicle_id`, `kind`, `reference` (60), `issued_on`, `expires_on` (not null), `notes` (500), `expiring_notified_for`, `expired_notified_for`, `version` | **one per kind** (`uq_vehicle_document (vehicle_id, kind)`); `expires_on >= issued_on`; index on `expires_on` |
+| `vehicle_type.required_driver_qualification_type_id` | the qualification its driver needs (null: none) | foreign key to `qualification_type`. `V8` fills it for the existing models: a self-propelled `RAIL_ONLY` one, `RAIL-DRIVER`; a `ROAD_RAIL` one, `RR-OPERATOR`; a `ROAD_ONLY` one with a `required_licence`, `LIC-B`/`LIC-C`/`LIC-CE` (and bumps their `version`) |
+| `instrument` | `code` (upper case, 32), `name`, `kind`, `serial_number` (60), `calibrated_on`, `calibration_expires_on` (null: no calibration), `notes` (500), `active`, `expiring_notified_for`, `expired_notified_for`, `version` | `code` unique and upper; `calibration_expires_on >= calibrated_on`; index on `calibration_expires_on` |
+
+Enums: `qualification_kind` (`DRIVING_LICENCE`, `VEHICLE_OPERATION`, `SAFETY`, `OTHER`),
+`vehicle_document_kind` (`ROAD_INSPECTION`, `RAIL_INSPECTION`, `INSURANCE`, `CRANE_CERTIFICATE`,
+`PLATFORM_CERTIFICATE`, `OTHER`), `instrument_kind` (`EARTHING_POLE`, `VOLTAGE_DETECTOR`, `MEASURING`,
+`OTHER`); `driving_licence` is the one of `V6`.
+
+`expiring_notified_for` and `expired_notified_for` are the expiry date that was already warned about.
+Only `ExpiryWatchService` writes them, with native SQL and the condition inside the statement (`update ...
+set expiring_notified_for = :expiresOn where id = :id and expires_on = :expiresOn and
+expiring_notified_for is distinct from :expiresOn`, one row → publish): one warning per expiry date
+however many instances run, and another one after a renewal. Hibernate reads them and never writes
+them (`insertable = false, updatable = false`), so saving the row never puts back a mark read before the
+warning; they do not bump `version` (they are not something a user edits) and are not audited.
 
 ## Background operations (`V4`)
 

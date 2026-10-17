@@ -47,8 +47,9 @@ schema change is a new migration, and one that changes an audited table changes 
 Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintenance`:
 
 - `domain/model` — framework-free rules: `CrewComposition` (`MIN_LINEMEN = 2`, `MAX_LINEMEN = 6`;
-  `mto-maintenance` keeps a copy for the crew of a shift), `OrganizationRules`, `FleetRules`. They return
-  the reason instead of throwing: the caller decides 400 or 409.
+  `mto-maintenance` keeps a copy for the crew of a shift), `OrganizationRules`, `FleetRules`, `ExpiryRules`
+  (expired from the day after the expiry date, the warning window, the default expiry of a type). They
+  return the reason instead of throwing: the caller decides 400 or 409.
 - `application` — `dto` (one package per resource), `service` + `service/impl` (package-private impls;
   `OrganizationLookups` loads with its 404, walks the tree, locks teams in id order and republishes
   them; `FleetResponses` builds the fleet answers; **`ResourcesEvents` is the event contract**),
@@ -69,8 +70,10 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
   team; a person is an open lineman of one team and leads one active team at most (partial unique
   indexes) and is never both. A deactivated team releases its linemen and comes back with new ones.
 - **Every transaction that publishes a `team.updated` locks those team rows in id order first**
-  (`OrganizationLookups.lockTeams`), before building the view; the same for the vehicles of a model and
-  for what `republish` publishes. The consumers' watermark is the outbox `sequenceNumber`, so its order
+  (`OrganizationLookups.lockTeams`), before building the view; the same for the vehicles of a model, for
+  the people who hold a qualification type, for the person whose qualifications change
+  (`PersonRepository.findByIdForUpdate`: their event carries the whole list) and for what `republish`
+  publishes. The consumers' watermark is the outbox `sequenceNumber`, so its order
   must be the order of the commits. What republishes what is in `docs/06-messaging.md`.
 - **`vehicle_position` moves only through `VehiclePositionRepository.moveTo`**, the native upsert with
   the `observed_at` watermark inside the statement; never read-then-write. `vehicle_location_event` is
@@ -96,16 +99,16 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
 ### Security
 
 Resource server of the `mto` realm, audience `mto-resources-api`. Client roles `resources-read`,
-`resources-write` (people, units, linemen, parking sites), `resources-fleet-write` (vehicles and
-models), `resources-location-write` (only `POST /vehicles/{id}/locations`), `resources-delete`
+`resources-write` (people and their qualifications, units, linemen, parking sites, qualification types),
+`resources-fleet-write` (vehicles and models), `resources-location-write` (only `POST /vehicles/{id}/locations`), `resources-delete`
 (`DELETE`, and `PUT`/`PATCH` with `active=false` through `@PreAuthorize`), `ops-metrics`, `ops-write`;
 realm roles only as `ROLE_REALM_*`. No role implies another; anything undeclared under the API is
 denied. A new role goes to `SecurityRoles` **and** `keycloak/mto-resources-partial-import.json`.
 
 ### Messaging
 
-Publishes `person`, `team` and `vehicle` (`created`/`updated`/`deactivated`) on `mto.resources.exchange`
-through the outbox, inside the business transaction; declares no queue (`mto-maintenance` and
+Publishes `person` (with all its `qualifications`), `team` and `vehicle` (`created`/`updated`/`deactivated`)
+on `mto.resources.exchange` through the outbox, inside the business transaction; declares no queue (`mto-maintenance` and
 `mto-notification` declare theirs). What `republish` publishes carries `republished: true`, and a vehicle
 event says whether that change moved its availability (`availabilityChanged`): `mto-notification` notices
 people of changes, not of republications nor of every note. Consumes

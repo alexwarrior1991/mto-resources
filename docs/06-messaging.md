@@ -16,7 +16,7 @@ publisher confirms. With `app.rabbitmq.enabled=false` the publisher is the `NoOp
 
 | Event | `values` |
 |---|---|
-| `person.created`, `person.updated`, `person.deactivated` | `code`, `firstName`, `lastName`, `fullName`, `username`, `employeeNumber`, `category`, `employer`, `company`, `active`, `version`, `republished`. Never the phone. |
+| `person.created`, `person.updated`, `person.deactivated` | `code`, `firstName`, `lastName`, `fullName`, `username`, `employeeNumber`, `category`, `employer`, `company`, `active`, `version`, `republished`, `qualifications` (all of them, the expired ones too, by `code`: `{code, kind, drivingLicence, expiresOn}`, `expiresOn` null when it does not expire). Never the phone. |
 | `team.created`, `team.updated`, `team.deactivated` | `code`, `name`, `discipline`, `active`, `parentId`, `departmentId`, `executionPackageIds`, `defaultVehicle {id, code}`, `leader`, `supervisor` (head of the nearest supervision above), `chiefSupervisor`, `members` (each person as `{personId, code, fullName, username, category}`), `linemen`, `version`, `republished` |
 | `vehicle.created`, `vehicle.updated`, `vehicle.deactivated` | `code`, `name`, `type {id, code, name, mobility, category, selfPropelled, portable, seats, railGearType, transportModeAuthorised, capabilities}`, `registrationPlate`, `railVehicleNumber`, `operationalStatus`, `available`, `active`, `version`, `availabilityChanged`, `republished` |
 
@@ -34,7 +34,12 @@ example in the same commit (`MESSAGING_EXAMPLES_WRITE=true` regenerates them).
 - **A random `operationId` per event**: two `team.updated` of the same request are two messages.
 - **What republishes what**: a person's name, username, category or code → their teams; the head or the
   parent of a unit → every team under it; the linemen of a team → that team; a vehicle model → its
-  vehicles.
+  vehicles; a qualification of a person (given, changed or removed) → that person, `person.updated` with
+  the whole list (the person row is locked first, so the last event of a person carries every
+  qualification); the kind or the licence of a qualification type → the people who hold it, locked in id
+  order.
+- **A list travels whole**: `qualifications` is every qualification of the person, and an event replaces
+  the list the consumer had. An event without the key (an older `mto-resources`) says nothing about it.
 - **`updated` is an upsert**: `republish` publishes `updated` (or `deactivated`) of things the consumer
   may never have seen. What it publishes carries `republished: true` (everything else, `false`): a
   snapshot applies it like any other, and whoever tells people about changes (`mto-notification`)

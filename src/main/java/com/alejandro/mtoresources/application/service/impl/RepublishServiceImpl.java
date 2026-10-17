@@ -5,8 +5,10 @@ import com.alejandro.mtoresources.application.service.DomainEventPublisher;
 import com.alejandro.mtoresources.application.service.RepublishService;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnit;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Person;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonQualification;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Vehicle;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.OrganizationUnitRepository;
+import com.alejandro.mtoresources.infrastructure.persistence.repository.PersonQualificationRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.PersonRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.VehicleRepository;
 import org.slf4j.Logger;
@@ -21,9 +23,11 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Republica en lotes de {@value #BATCH} filas, cada lote en su transaccion y con sus filas bloqueadas
@@ -37,16 +41,18 @@ class RepublishServiceImpl implements RepublishService {
     static final int BATCH = 200;
 
     private final PersonRepository personRepository;
+    private final PersonQualificationRepository qualificationRepository;
     private final OrganizationUnitRepository unitRepository;
     private final VehicleRepository vehicleRepository;
     private final OrganizationLookups lookups;
     private final DomainEventPublisher events;
     private final TransactionTemplate transactions;
 
-    RepublishServiceImpl(PersonRepository personRepository, OrganizationUnitRepository unitRepository,
-                         VehicleRepository vehicleRepository, OrganizationLookups lookups, DomainEventPublisher events,
-                         PlatformTransactionManager transactionManager) {
+    RepublishServiceImpl(PersonRepository personRepository, PersonQualificationRepository qualificationRepository,
+                         OrganizationUnitRepository unitRepository, VehicleRepository vehicleRepository, OrganizationLookups lookups,
+                         DomainEventPublisher events, PlatformTransactionManager transactionManager) {
         this.personRepository = personRepository;
+        this.qualificationRepository = qualificationRepository;
         this.unitRepository = unitRepository;
         this.vehicleRepository = vehicleRepository;
         this.lookups = lookups;
@@ -94,7 +100,10 @@ class RepublishServiceImpl implements RepublishService {
     private int people(Collection<UUID> ids) {
         Integer published = transactions.execute(status -> {
             List<Person> people = personRepository.lockAllInIdOrder(ids);
-            people.forEach(person -> events.publish(ResourcesEvents.person(person, eventName(person.getActive()), true)));
+            Map<UUID, List<PersonQualification>> qualifications = qualificationRepository.findAllOfPeople(ids).stream()
+                    .collect(Collectors.groupingBy(qualification -> qualification.getPerson().getId()));
+            people.forEach(person -> events.publish(ResourcesEvents.person(person,
+                    qualifications.getOrDefault(person.getId(), List.of()), eventName(person.getActive()), true)));
             return people.size();
         });
         return published == null ? 0 : published;

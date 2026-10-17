@@ -93,6 +93,23 @@ class ApiAuthorizationRulesTest {
     }
 
     @Test
+    void qualificationTypesAndTheQualificationsOfAPersonAreResourcesWrite() throws Exception {
+        expect(get(API + "/qualification-types"), 200, SecurityRoles.RESOURCES_READ);
+        expect(get(API + "/people/1/qualifications"), 200, SecurityRoles.RESOURCES_READ);
+        for (MockHttpServletRequestBuilder request : new MockHttpServletRequestBuilder[]{post(API + "/qualification-types"),
+                put(API + "/qualification-types/1"), patch(API + "/qualification-types/1"), post(API + "/people/1/qualifications"),
+                patch(API + "/people/1/qualifications/2")}) {
+            expect(request, 200, SecurityRoles.RESOURCES_WRITE);
+        }
+        expect(post(API + "/qualification-types"), 403, SecurityRoles.RESOURCES_READ, SecurityRoles.RESOURCES_FLEET_WRITE,
+                SecurityRoles.RESOURCES_DELETE);
+        expect(post(API + "/people/1/qualifications"), 403, SecurityRoles.RESOURCES_FLEET_WRITE, SecurityRoles.RESOURCES_LOCATION_WRITE);
+        expect(delete(API + "/people/1/qualifications/2"), 200, SecurityRoles.RESOURCES_DELETE);
+        expect(delete(API + "/qualification-types/1"), 200, SecurityRoles.RESOURCES_DELETE);
+        expect(delete(API + "/people/1/qualifications/2"), 403, SecurityRoles.RESOURCES_WRITE);
+    }
+
+    @Test
     void vehiclesAndTheirModelsAreFleetWrite() throws Exception {
         expect(post(API + "/vehicles"), 200, SecurityRoles.RESOURCES_FLEET_WRITE);
         expect(patch(API + "/vehicle-types/1"), 200, SecurityRoles.RESOURCES_FLEET_WRITE);
@@ -160,7 +177,8 @@ class ApiAuthorizationRulesTest {
             }
         }
         assertTrue(checked.containsAll(List.of("VehicleTypeController.update", "VehicleTypeController.patch",
-                "ParkingSiteController.update", "ParkingSiteController.patch", "PersonController.update", "VehicleController.patch")), checked.toString());
+                "ParkingSiteController.update", "ParkingSiteController.patch", "PersonController.update", "VehicleController.patch",
+                "QualificationTypeController.update", "QualificationTypeController.patch")), checked.toString());
     }
 
     private void expect(MockHttpServletRequestBuilder request, int status, String... roles) throws Exception {
@@ -179,28 +197,29 @@ class ApiAuthorizationRulesTest {
     @RequestMapping(SecurityConfiguration.API)
     static class Probes {
 
-        @GetMapping({"/people", "/vehicles/positions"})
+        @GetMapping({"/people", "/vehicles/positions", "/qualification-types", "/people/{id}/qualifications"})
         String read() {
             return "ok";
         }
 
         @PostMapping({"/people", "/units", "/parking-sites", "/vehicles", "/vehicles/{id}/locations", "/units/{id}/members/{person}/leave",
-                "/undeclared"})
+                "/undeclared", "/qualification-types", "/people/{id}/qualifications"})
         String create() {
             return "ok";
         }
 
-        @PatchMapping({"/people/{id}", "/vehicles/{id}", "/vehicle-types/{id}"})
+        @PatchMapping({"/people/{id}", "/vehicles/{id}", "/vehicle-types/{id}", "/qualification-types/{id}",
+                "/people/{id}/qualifications/{qualification}"})
         String patchIt(@PathVariable String id) {
             return "ok";
         }
 
-        @PutMapping("/units/{id}/members")
+        @PutMapping({"/units/{id}/members", "/qualification-types/{id}"})
         String replace(@PathVariable String id) {
             return "ok";
         }
 
-        @DeleteMapping({"/people/{id}", "/vehicles/{id}"})
+        @DeleteMapping({"/people/{id}", "/vehicles/{id}", "/qualification-types/{id}", "/people/{id}/qualifications/{qualification}"})
         String remove(@PathVariable String id) {
             return "ok";
         }

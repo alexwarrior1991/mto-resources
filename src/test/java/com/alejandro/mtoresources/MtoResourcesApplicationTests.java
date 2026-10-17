@@ -5,7 +5,9 @@ import com.alejandro.mtoresources.application.service.DomainEventPublisher;
 import com.alejandro.mtoresources.application.service.IncomingEventHandler;
 import com.alejandro.mtoresources.application.service.OrganizationUnitService;
 import com.alejandro.mtoresources.application.service.ParkingSiteService;
+import com.alejandro.mtoresources.application.service.PersonQualificationService;
 import com.alejandro.mtoresources.application.service.PersonService;
+import com.alejandro.mtoresources.application.service.QualificationTypeService;
 import com.alejandro.mtoresources.application.service.RepublishService;
 import com.alejandro.mtoresources.application.service.VehicleLocationService;
 import com.alejandro.mtoresources.application.service.VehicleService;
@@ -86,7 +88,7 @@ class MtoResourcesApplicationTests extends PostgreSQLTestContainer {
     void everyBusinessServiceIsABean() {
         for (Class<?> type : List.of(PersonService.class, OrganizationUnitService.class, ParkingSiteService.class, VehicleTypeService.class,
                 VehicleService.class, VehicleLocationService.class, RepublishService.class, BudgetedOperations.class,
-                DomainEventPublisher.class, RepublishEndpoint.class)) {
+                DomainEventPublisher.class, RepublishEndpoint.class, QualificationTypeService.class, PersonQualificationService.class)) {
             assertNotNull(context.getBean(type), type.getSimpleName());
         }
         assertTrue(handlers.stream().anyMatch(handler -> handler.sourceService().equals("mto-maintenance")
