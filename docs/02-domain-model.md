@@ -119,6 +119,29 @@ It is retired, never deleted (the shifts name it); recalibrating it is changing 
 `mto-maintenance` keeps a snapshot of every instrument (`instrument.*`) to pick them in a shift, and it is
 the one that refuses an inactive one or one whose calibration expired.
 
+## Expiries
+
+A qualification, a document and the calibration of an instrument are valid until their expiry date
+included, and **expired from the next day** (`ExpiryRules`, «today» in the clock of the service, UTC). Every
+day `ExpiryWatchService` (`app.resources.expiry.*`: `enabled`, `cron`, `warning-days` 30) warns about them,
+for active people, active vehicles and active instruments only:
+
+| Event | When |
+|---|---|
+| `qualification.expiring`, `vehicle-document.expiring`, `calibration.expiring` | `warning-days` days or fewer to its expiry date, and still valid (the expiry date itself too, `daysLeft: 0`) |
+| `qualification.expired`, `vehicle-document.expired`, `calibration.expired` | From the day after its expiry date (`daysLeft` negative) |
+
+**Once per expiry date**: the warning is decided by a conditional mark on the row
+(`expiring_notified_for`, `expired_notified_for`, written with the condition inside the statement, one row
+→ publish, in the same transaction), so a second pass or a second instance says nothing, and a renewal
+(another expiry date) warns again. Its `operationId` is derived from what it tells
+(`UUID.nameUUIDFromBytes("<entity>:<event>:<id>:<expiresOn>")`), so even two passes that both published
+would leave one in the consumer's inbox. The warning of a qualification says the open team of the person
+(as a lineman or as its leader) and the leader of that team, never the person themselves.
+Something that jumps straight past the window (an expired one given today) is only warned about as
+expired. The watcher runs only with the broker on (otherwise the marks would be spent without telling
+anybody); the tests call it by hand.
+
 ## Where each vehicle is
 
 `vehicle_location_event` is the append-only history; `vehicle_position` is the current position, one

@@ -2,6 +2,7 @@ package com.alejandro.mtoresources;
 
 import com.alejandro.mtoresources.application.service.BudgetedOperations;
 import com.alejandro.mtoresources.application.service.DomainEventPublisher;
+import com.alejandro.mtoresources.application.service.ExpiryWatchService;
 import com.alejandro.mtoresources.application.service.IncomingEventHandler;
 import com.alejandro.mtoresources.application.service.InstrumentService;
 import com.alejandro.mtoresources.application.service.OrganizationUnitService;
@@ -91,7 +92,7 @@ class MtoResourcesApplicationTests extends PostgreSQLTestContainer {
         for (Class<?> type : List.of(PersonService.class, OrganizationUnitService.class, ParkingSiteService.class, VehicleTypeService.class,
                 VehicleService.class, VehicleLocationService.class, RepublishService.class, BudgetedOperations.class,
                 DomainEventPublisher.class, RepublishEndpoint.class, QualificationTypeService.class, PersonQualificationService.class,
-                VehicleDocumentService.class, InstrumentService.class)) {
+                VehicleDocumentService.class, InstrumentService.class, ExpiryWatchService.class)) {
             assertNotNull(context.getBean(type), type.getSimpleName());
         }
         assertTrue(handlers.stream().anyMatch(handler -> handler.sourceService().equals("mto-maintenance")

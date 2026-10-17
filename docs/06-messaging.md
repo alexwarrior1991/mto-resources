@@ -21,6 +21,13 @@ publisher confirms. With `app.rabbitmq.enabled=false` the publisher is the `NoOp
 | `vehicle.created`, `vehicle.updated`, `vehicle.deactivated` | `code`, `name`, `type {id, code, name, mobility, category, selfPropelled, portable, seats, railGearType, transportModeAuthorised, capabilities, requiredDriverQualification}` (the code of the qualification its driver needs, or null), `registrationPlate`, `railVehicleNumber`, `operationalStatus`, `available`, `active`, `version`, `availabilityChanged`, `republished`, `documents` (all of them, the expired ones too, by `kind`: `{kind, reference, expiresOn}`) |
 
 | `instrument.created`, `instrument.updated`, `instrument.deactivated` | `code`, `name`, `kind`, `serialNumber`, `calibratedOn`, `calibrationExpiresOn`, `active`, `version`, `republished`. `deactivated` once, when it is retired; a change to a retired one is `updated` |
+| `qualification.expiring`, `qualification.expired` | The id is the one of the `person_qualification` row. `personId`, `personCode`, `fullName`, `username`, `qualificationCode`, `qualificationName`, `kind`, `expiresOn`, `daysLeft` (negative once expired), `teamCode` (the open team of the person, as a lineman or as its leader, or null), `leader` (`{personId, code, fullName, username, category}` of that team's leader, or null; never the person themselves) |
+| `vehicle-document.expiring`, `vehicle-document.expired` | The id is the one of the document. `vehicleId`, `vehicleCode`, `vehicleName`, `kind`, `reference`, `expiresOn`, `daysLeft` |
+| `calibration.expiring`, `calibration.expired` | The id is the one of the instrument. `instrumentId`, `code`, `name`, `kind`, `serialNumber`, `calibrationExpiresOn`, `daysLeft` |
+
+The expiry warnings come from the daily `ExpiryWatchService` (`docs/02-domain-model.md`, *Expiries*), with
+actor `SYSTEM` and no correlation, once per expiry date. `mto-notification` reads them (`mto.resources.#`)
+to warn the person, their leader and whoever manages the staff or the fleet.
 
 One example per event in `messaging/examples/`, built by `MessagingContractExamplesTest` with
 `ResourcesEvents` and the real factory. **Keys are only added**; a new key or event changes its
@@ -33,7 +40,10 @@ example in the same commit (`MESSAGING_EXAMPLES_WRITE=true` regenerates them).
   transaction that publishes a `team.updated` first locks the rows of those teams in id order
   (`OrganizationLookups.lockTeams`), and the vehicles and people it republishes likewise, so the order
   of the sequence numbers is the order of the commits for each of them.
-- **A random `operationId` per event**: two `team.updated` of the same request are two messages.
+- **A random `operationId` per event**: two `team.updated` of the same request are two messages. The
+  exception are the expiry warnings, whose `operationId` is derived from what they tell
+  (`UUID.nameUUIDFromBytes("<entity>:<event>:<id>:<expiresOn>")`, `ResourcesEvents.expiryOperationId`):
+  two passes that both published leave one in the inbox.
 - **What republishes what**: a person's name, username, category or code → their teams; the head or the
   parent of a unit → every team under it; the linemen of a team → that team; a vehicle model → its
   vehicles; a qualification of a person (given, changed or removed) → that person, `person.updated` with

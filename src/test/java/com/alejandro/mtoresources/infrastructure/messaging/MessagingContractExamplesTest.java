@@ -70,6 +70,9 @@ class MessagingContractExamplesTest {
 
     private static final Instant CREATION_DATE = Instant.parse("2026-10-16T09:00:00Z");
 
+    /** El dia del vigilante en los ejemplos de caducidad: el de {@link #CREATION_DATE}. */
+    private static final LocalDate TODAY = LocalDate.parse("2026-10-16");
+
     private static final MessageActor MANAGER = MessageActor.of("6f1b1c8e-0000-4000-8000-000000000051", "recursos.gestor");
     private static final String REQUEST_CORRELATION_ID = "8c3b8c1a-1111-4222-8333-555555555555";
 
@@ -191,6 +194,73 @@ class MessagingContractExamplesTest {
         ReflectionTestUtils.setField(instrument, "version", 2L);
         check("instrument-deactivated.json", "b0000000-0000-4000-8000-000000000012", MANAGER, REQUEST_CORRELATION_ID,
                 ResourcesEvents.instrument(instrument, ResourcesEvents.DEACTIVATED));
+    }
+
+    // --------------------------------------------------------------------------- expiries
+
+    @Test
+    void qualificationExpiring() throws IOException {
+        // Un lineman del equipo A: su jefe tambien se entera.
+        Person person = lineman("c0000000-0000-4000-8000-000000000010", "PER-000010", "Eli", "Katz", "equipo.operario");
+        PersonQualification qualification = qualification(person, railDriver(), "a1000000-0000-4000-8000-000000000010",
+                LocalDate.parse("2026-11-15"));
+        checkExpiry("qualification-expiring.json", ResourcesEvents.qualificationExpiry(qualification, ResourcesEvents.EXPIRING, TODAY, "A",
+                leader()), qualification.getExpiresOn());
+    }
+
+    @Test
+    void qualificationExpired() throws IOException {
+        // El jefe del equipo A: su aviso no lleva jefe, porque el jefe es el.
+        Person person = leader();
+        PersonQualification qualification = qualification(person, licenceC(), "a1000000-0000-4000-8000-000000000011",
+                LocalDate.parse("2026-10-15"));
+        checkExpiry("qualification-expired.json", ResourcesEvents.qualificationExpiry(qualification, ResourcesEvents.EXPIRED, TODAY, "A",
+                null), qualification.getExpiresOn());
+    }
+
+    @Test
+    void vehicleDocumentExpiring() throws IOException {
+        VehicleDocument inspection = VehicleDocument.builder().vehicle(roadRail()).kind(VehicleDocumentKind.ROAD_INSPECTION)
+                .reference("ITV-2026-118").expiresOn(LocalDate.parse("2026-11-01")).build();
+        entity(inspection, "a2000000-0000-4000-8000-000000000002");
+        checkExpiry("vehicle-document-expiring.json", ResourcesEvents.vehicleDocumentExpiry(inspection, ResourcesEvents.EXPIRING, TODAY),
+                inspection.getExpiresOn());
+    }
+
+    @Test
+    void vehicleDocumentExpired() throws IOException {
+        VehicleDocument insurance = VehicleDocument.builder().vehicle(roadRail()).kind(VehicleDocumentKind.INSURANCE)
+                .reference("POL-55120").expiresOn(LocalDate.parse("2026-10-14")).build();
+        entity(insurance, "a2000000-0000-4000-8000-000000000001");
+        checkExpiry("vehicle-document-expired.json", ResourcesEvents.vehicleDocumentExpiry(insurance, ResourcesEvents.EXPIRED, TODAY),
+                insurance.getExpiresOn());
+    }
+
+    @Test
+    void calibrationExpiring() throws IOException {
+        Instrument instrument = earthingPole();
+        instrument.setCalibratedOn(LocalDate.parse("2025-10-31"));
+        instrument.setCalibrationExpiresOn(LocalDate.parse("2026-10-30"));
+        checkExpiry("calibration-expiring.json", ResourcesEvents.calibrationExpiry(instrument, ResourcesEvents.EXPIRING, TODAY),
+                instrument.getCalibrationExpiresOn());
+    }
+
+    @Test
+    void calibrationExpired() throws IOException {
+        Instrument instrument = Instrument.builder().code("DT-03").name("Voltage detector 25 kV").kind(InstrumentKind.VOLTAGE_DETECTOR)
+                .serialNumber("VD-7731").calibratedOn(LocalDate.parse("2025-10-13")).calibrationExpiresOn(LocalDate.parse("2026-10-12"))
+                .build();
+        entity(instrument, "a3000000-0000-4000-8000-000000000003");
+        checkExpiry("calibration-expired.json", ResourcesEvents.calibrationExpiry(instrument, ResourcesEvents.EXPIRED, TODAY),
+                instrument.getCalibrationExpiresOn());
+    }
+
+    /**
+     * Un aviso de caducidad lo publica el vigilante diario: sin token ({@code SYSTEM}), sin correlacion, y con
+     * el {@code operationId} derivado de lo que cuenta.
+     */
+    private void checkExpiry(String fileName, DomainEvent event, LocalDate expiresOn) throws IOException {
+        check(fileName, ResourcesEvents.expiryOperationId(event, expiresOn).toString(), MessageActor.system(), null, event);
     }
 
     // ----------------------------------------------------------------------------- fixtures

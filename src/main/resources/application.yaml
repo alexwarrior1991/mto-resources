@@ -203,3 +203,13 @@ app:
     purge-every: 1h
     purge-batch-size: 500
     scheduling-enabled: ${APP_OPERATIONS_SCHEDULING_ENABLED:true}
+
+  # El vigilante diario de caducidades (ExpiryWatchService): avisa una vez por fecha de lo que caduca dentro
+  # de warning-days dias (expiring) y de lo que ya caduco (expired, desde el dia siguiente) en las
+  # cualificaciones de las personas, los documentos de los vehiculos y la calibracion de los instrumentos.
+  # El cron va en UTC, como el reloj del servicio; solo corre con el broker encendido.
+  resources:
+    expiry:
+      enabled: ${APP_RESOURCES_EXPIRY_ENABLED:true}
+      cron: "${APP_RESOURCES_EXPIRY_CRON:0 10 4 * * *}"
+      warning-days: ${APP_RESOURCES_EXPIRY_WARNING_DAYS:30}

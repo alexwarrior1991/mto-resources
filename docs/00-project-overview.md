@@ -11,7 +11,9 @@
    leader, always, and 2 to 6 linemen** (3 to 7 people). A supervisor runs several teams, normally in
    the same execution package (EP); a chief supervisor runs the supervisors.
 3. **With what and where**: the rail, road-rail and road vehicles, their models and characteristics,
-   and where each one is at every moment.
+   and where each one is at every moment; and the calibrated instruments taken to the work site.
+4. **Until when**: the qualifications of every person, the documents of every vehicle and the
+   calibration of every instrument, with their expiry dates, and a daily warning of what expires.
 
 ## Why a service of its own
 
@@ -39,7 +41,8 @@ like the material is shared through `mto-stock`.
 
 | Service | Relation |
 |---|---|
-| `mto-maintenance` | Consumes `mto.resources.{person,team,vehicle}.*` (its teams, crews and vehicles); publishes `mto.maintenance.shift.*`, which moves the vehicles here. |
+| `mto-maintenance` | Consumes `mto.resources.{person,team,vehicle,instrument}.*` (its teams, crews, vehicles and instruments, with their qualifications, documents and calibration: what is expired does not enter a shift); publishes `mto.maintenance.shift.*`, which moves the vehicles here. |
+| `mto-notification` | Records every event of `mto.resources.#`, and warns of the expiries (`qualification.*`, `vehicle-document.*`, `calibration.*`). |
 | `mto-configuration` | EP, track and station ids are stored as plain `bigint`s, without a foreign key. |
 | `mto-gateway` | `/api/resources/** → /api/v1/resources/**`. |
 | `mto-platform` | Brings up PostgreSQL (`mto_resources`), RabbitMQ and Keycloak; applies `keycloak/`. |

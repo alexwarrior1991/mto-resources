@@ -4,7 +4,10 @@ import com.alejandro.mtoresources.application.dto.messaging.InboxMessageCommand;
 import com.alejandro.mtoresources.application.dto.messaging.IncomingEvent;
 import com.alejandro.mtoresources.application.dto.messaging.IncomingEventMessage;
 import com.alejandro.mtoresources.application.dto.messaging.MessageActor;
+import com.alejandro.mtoresources.application.service.ExpiryWatchService;
 import com.alejandro.mtoresources.application.service.IncomingEventProcessor;
+import com.alejandro.mtoresources.configuration.expiry.ExpiryWatchConfiguration;
+import com.alejandro.mtoresources.configuration.expiry.ExpiryWatchProperties;
 import com.alejandro.mtoresources.configuration.messaging.MessagePayloadSignatureVerifier;
 import com.alejandro.mtoresources.configuration.messaging.MessageSignatureMode;
 import com.alejandro.mtoresources.configuration.messaging.MessageSignatureProperties;
@@ -23,6 +26,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.amqp.AmqpRejectAndDontRequeueException;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -36,7 +40,10 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
-/** Los consumidores de los turnos de {@code mto-maintenance} y de las posiciones de {@code mto-field}, su topologia y los nombres del canal propio. */
+/**
+ * Los consumidores de los turnos de {@code mto-maintenance} y de las posiciones de {@code mto-field}, su topologia,
+ * los nombres del canal propio y cuando se planifica el vigilante de caducidades.
+ */
 class MessagingLayerTest {
 
     private final IncomingEventProcessor processor = mock(IncomingEventProcessor.class);
@@ -101,6 +108,37 @@ class MessagingLayerTest {
         assertEquals("mto.resources.team.updated", ResourcesRabbitMqNames.routingKey("team", "updated"));
         assertEquals("RESOURCES_VEHICLE_DEACTIVATED", ResourcesRabbitMqNames.eventType("vehicle", "deactivated"));
         assertEquals("mto.resources.maintenance.queue", MaintenanceRabbitMqNames.RESOURCES_MAINTENANCE_QUEUE);
+    }
+
+    @Test
+    void theExpiryWarningsAndTheInstrumentsGoToTheOwnExchangeWithTheirRoutingKeyAndType() {
+        assertEquals("mto.resources.vehicle-document.expiring", ResourcesRabbitMqNames.routingKey("vehicle-document", "expiring"));
+        assertEquals("RESOURCES_VEHICLE_DOCUMENT_EXPIRED", ResourcesRabbitMqNames.eventType("vehicle-document", "expired"));
+        assertEquals("mto.resources.qualification.expired", ResourcesRabbitMqNames.routingKey("qualification", "expired"));
+        assertEquals("RESOURCES_CALIBRATION_EXPIRING", ResourcesRabbitMqNames.eventType("calibration", "expiring"));
+        assertEquals("mto.resources.instrument.deactivated", ResourcesRabbitMqNames.routingKey("instrument", "deactivated"));
+    }
+
+    /**
+     * El vigilante de caducidades solo se planifica con el broker y con su interruptor encendidos: sin broker
+     * gastaria las marcas sin avisar a nadie. Sus properties existen siempre, porque los tests lo llaman.
+     */
+    @Test
+    void theExpiryWatcherIsScheduledOnlyWithTheBrokerAndItsSwitchOn() throws ClassNotFoundException {
+        Class<?> scheduler = Class.forName(ExpiryWatchConfiguration.class.getName() + "$Scheduler");
+        ApplicationContextRunner runner = new ApplicationContextRunner()
+                .withUserConfiguration(ExpiryWatchConfiguration.class)
+                .withBean(ExpiryWatchService.class, () -> mock(ExpiryWatchService.class));
+
+        runner.withPropertyValues("app.rabbitmq.enabled=true", "app.resources.expiry.warning-days=10").run(context -> {
+            assertEquals(1, context.getBeansOfType(scheduler).size());
+            assertEquals(10, context.getBean(ExpiryWatchProperties.class).warningDays());
+        });
+        runner.withPropertyValues("app.rabbitmq.enabled=true", "app.resources.expiry.enabled=false").run(context -> {
+            assertEquals(0, context.getBeansOfType(scheduler).size());
+            assertEquals(ExpiryWatchProperties.DEFAULT_WARNING_DAYS, context.getBean(ExpiryWatchProperties.class).warningDays());
+        });
+        runner.withPropertyValues("app.rabbitmq.enabled=false").run(context -> assertEquals(0, context.getBeansOfType(scheduler).size()));
     }
 
     private static IncomingEventMessage message(String origin, IncomingEvent event) {

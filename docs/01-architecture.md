@@ -5,7 +5,8 @@ Spring Boot 4 / Java 25, the three layers of `mto-maintenance` under `com.alejan
 - `domain/model` — framework-free rules: `CrewComposition` (1 leader + 2..6 linemen; the same rule is
   copied in `mto-maintenance` for the crew of a shift), `OrganizationRules` (parent of a strictly
   higher level, head of the category of the level, who can be a lineman), `FleetRules` (a model
-  coherent with its mobility; where a vehicle can be; towing and carrying), `DomainValidations`.
+  coherent with its mobility; where a vehicle can be; towing and carrying; the driver qualification of a
+  model), `ExpiryRules` (when something expires and what to warn about), `DomainValidations`.
 - `application` — `dto` (one package per resource), `service` + `service/impl` (package-private impls
   behind public interfaces; `OrganizationLookups` and `FleetResponses` are shared helpers;
   `ResourcesEvents` is the event contract), `mapper` (MapStruct, entity → response only), `exception`.
@@ -14,7 +15,8 @@ Spring Boot 4 / Java 25, the three layers of `mto-maintenance` under `com.alejan
   the exception handler, the `republish` Actuator endpoint), `messaging/rabbitmq` (the consumer of the
   shifts of `mto-maintenance`) and `messaging/outbox` (the copy of `mto-configuration`'s outbox).
 - `configuration` — security (Keycloak resource server), `rabbitmq`, `messaging` (signature), `outbox`,
-  `async` (virtual threads and the background operations), JPA auditing, OpenAPI, the `Clock`.
+  `async` (virtual threads and the background operations), `expiry` (`ExpiryWatchProperties` and the
+  daily scheduler of `ExpiryWatchService`, `app.resources.expiry.*`), JPA auditing, OpenAPI, the `Clock`.
 
 ## Virtual threads
 

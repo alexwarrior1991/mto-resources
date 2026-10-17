@@ -1,6 +1,7 @@
 package com.alejandro.mtoresources.application.service.impl;
 
 import com.alejandro.mtoresources.application.dto.common.MergePatch;
+import com.alejandro.mtoresources.application.dto.expiry.ExpiryWatchResult;
 import com.alejandro.mtoresources.application.dto.fleet.FleetPositionResponse;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleDocumentRequest;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleDocumentResponse;
@@ -48,6 +49,7 @@ import com.alejandro.mtoresources.application.exception.TooManyOperationsExcepti
 import com.alejandro.mtoresources.application.exception.ValidationException;
 import com.alejandro.mtoresources.application.service.BudgetedOperations;
 import com.alejandro.mtoresources.application.service.DomainEventPublisher;
+import com.alejandro.mtoresources.application.service.ExpiryWatchService;
 import com.alejandro.mtoresources.application.service.InstrumentService;
 import com.alejandro.mtoresources.application.service.OrganizationUnitService;
 import com.alejandro.mtoresources.application.service.PersonQualificationService;
@@ -97,6 +99,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -173,6 +176,8 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
     private VehicleDocumentService vehicleDocuments;
     @Autowired
     private InstrumentService instruments;
+    @Autowired
+    private ExpiryWatchService expiryWatch;
     @Autowired
     private VehicleService vehicles;
     @Autowired
@@ -1084,6 +1089,184 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
                 && ((List<?>) event.values().get("qualifications")).equals(List.of(qualificationValues(type.code(), "OTHER", null, null)))));
     }
 
+    // ----------------------------------------------------------------------- caducidades
+
+    @Test
+    void theExpiryWatcherWarnsOnceForEachExpiryDateAndAgainAfterARenewal() {
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        PersonResponse leader = person(PersonCategory.TEAM_LEADER);
+        List<UUID> linemen = linemen(2);
+        OrganizationUnitResponse team = team(supervision(Set.of()).id(), leader.id(), linemen, Set.of());
+        PersonResponse lineman = people.findById(linemen.getFirst());
+        PersonQualificationResponse driver = personQualifications.create(lineman.id(), new PersonQualificationRequest(RAIL_DRIVER, "RD-9",
+                null, today.plusDays(10), null));
+        events.clear();
+
+        ExpiryWatchResult first = expiryWatch.check();
+
+        assertEquals(today, first.date());
+        assertEquals(30, first.warningDays());
+        assertTrue(first.qualifications() >= 1);
+        DomainEvent expiring = events.onlyAbout(driver.id());
+        assertEquals("qualification", expiring.entityName());
+        assertEquals("expiring", expiring.eventName());
+        Map<String, Object> leaderValues = new LinkedHashMap<>();
+        leaderValues.put("personId", leader.id().toString());
+        leaderValues.put("code", leader.code());
+        leaderValues.put("fullName", leader.fullName());
+        leaderValues.put("username", leader.username());
+        leaderValues.put("category", "TEAM_LEADER");
+        Map<String, Object> expected = new LinkedHashMap<>();
+        expected.put("personId", lineman.id().toString());
+        expected.put("personCode", lineman.code());
+        expected.put("fullName", lineman.fullName());
+        expected.put("username", lineman.username());
+        expected.put("qualificationCode", "RAIL-DRIVER");
+        expected.put("qualificationName", "Rail auxiliary vehicle driver");
+        expected.put("kind", "VEHICLE_OPERATION");
+        expected.put("expiresOn", today.plusDays(10).toString());
+        expected.put("daysLeft", 10);
+        expected.put("teamCode", team.code());
+        expected.put("leader", leaderValues);
+        assertEquals(expected, expiring.values());
+        assertEquals(UUID.nameUUIDFromBytes(("qualification:expiring:" + driver.id() + ":" + today.plusDays(10))
+                .getBytes(StandardCharsets.UTF_8)), events.operationIdOf(expiring), "Derived from what it tells");
+
+        events.clear();
+        expiryWatch.check();
+        assertEquals(List.of(), events.about(driver.id()), "Once for each expiry date");
+
+        // Renovada, pero aun dentro del aviso: otra fecha, otro aviso.
+        personQualifications.patch(lineman.id(), driver.id(), MergePatch.of(new PersonQualificationUpdateRequest(null, null,
+                today.plusDays(20), null, null)));
+        events.clear();
+        expiryWatch.check();
+        assertEquals(20, events.onlyAbout(driver.id()).values().get("daysLeft"));
+
+        // Caducada desde ayer: una vez, con los dias en negativo.
+        personQualifications.patch(lineman.id(), driver.id(), MergePatch.of(new PersonQualificationUpdateRequest(null, null,
+                today.minusDays(1), null, null)));
+        events.clear();
+        expiryWatch.check();
+        DomainEvent expired = events.onlyAbout(driver.id());
+        assertEquals("expired", expired.eventName());
+        assertEquals(-1, expired.values().get("daysLeft"));
+        assertEquals(UUID.nameUUIDFromBytes(("qualification:expired:" + driver.id() + ":" + today.minusDays(1))
+                .getBytes(StandardCharsets.UTF_8)), events.operationIdOf(expired));
+        events.clear();
+        expiryWatch.check();
+        assertEquals(List.of(), events.about(driver.id()));
+
+        // Renovada lejos: nada que avisar.
+        personQualifications.patch(lineman.id(), driver.id(), MergePatch.of(new PersonQualificationUpdateRequest(null, null,
+                today.plusDays(400), null, null)));
+        events.clear();
+        expiryWatch.check();
+        assertEquals(List.of(), events.about(driver.id()));
+    }
+
+    @Test
+    void theLeaderOfATeamIsWarnedWithoutHimselfAsLeaderAndWhoeverHasNoTeamWithoutAny() {
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        PersonResponse leader = person(PersonCategory.TEAM_LEADER);
+        OrganizationUnitResponse team = team(supervision(Set.of()).id(), leader.id(), linemen(2), Set.of());
+        PersonResponse loner = person(PersonCategory.WORKER);
+        PersonResponse gone = person(PersonCategory.WORKER);
+        QualificationTypeResponse type = qualificationType(QualificationKind.SAFETY, null, null);
+        PersonQualificationResponse ofLeader = personQualifications.create(leader.id(), new PersonQualificationRequest(type.id(), null, null,
+                today.plusDays(5), null));
+        PersonQualificationResponse ofLoner = personQualifications.create(loner.id(), new PersonQualificationRequest(type.id(), null, null,
+                today, null));
+        PersonQualificationResponse ofGone = personQualifications.create(gone.id(), new PersonQualificationRequest(type.id(), null, null,
+                today.minusDays(3), null));
+        people.deactivate(gone.id());
+        events.clear();
+
+        expiryWatch.check();
+
+        DomainEvent leaderWarning = events.onlyAbout(ofLeader.id());
+        assertEquals(team.code(), leaderWarning.values().get("teamCode"));
+        assertTrue(leaderWarning.values().containsKey("leader"));
+        assertNull(leaderWarning.values().get("leader"), "Never the person themselves");
+        assertEquals(5, leaderWarning.values().get("daysLeft"));
+        DomainEvent lonerWarning = events.onlyAbout(ofLoner.id());
+        assertEquals("expiring", lonerWarning.eventName(), "Still valid on its expiry date");
+        assertEquals(0, lonerWarning.values().get("daysLeft"));
+        assertNull(lonerWarning.values().get("teamCode"));
+        assertNull(lonerWarning.values().get("leader"));
+        assertEquals(List.of(), events.about(ofGone.id()), "Whoever no longer works is not warned about");
+    }
+
+    @Test
+    void theExpiryWatcherWarnsAboutTheDocumentsOfAVehicleAndTheCalibrationOfAnInstrument() {
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        VehicleResponse vehicle = railVehicle(Set.of());
+        VehicleResponse retired = railVehicle(Set.of());
+        VehicleDocumentResponse inspection = vehicleDocuments.create(vehicle.id(), new VehicleDocumentRequest(
+                VehicleDocumentKind.RAIL_INSPECTION, "RI-7", null, today.plusDays(30), null));
+        VehicleDocumentResponse insurance = vehicleDocuments.create(vehicle.id(), new VehicleDocumentRequest(VehicleDocumentKind.INSURANCE,
+                "POL-1", null, today.minusDays(2), null));
+        VehicleDocumentResponse far = vehicleDocuments.create(vehicle.id(), new VehicleDocumentRequest(VehicleDocumentKind.CRANE_CERTIFICATE,
+                null, null, today.plusDays(31), null));
+        VehicleDocumentResponse ofRetired = vehicleDocuments.create(retired.id(), new VehicleDocumentRequest(VehicleDocumentKind.INSURANCE,
+                null, null, today.minusDays(1), null));
+        vehicles.deactivate(retired.id());
+        InstrumentResponse pole = instruments.create(new InstrumentRequest("PT-" + random(), "Earthing pole", InstrumentKind.EARTHING_POLE,
+                "EP-77", null, today.plusDays(1), null));
+        InstrumentResponse detector = instruments.create(new InstrumentRequest("DT-" + random(), "Detector", InstrumentKind.VOLTAGE_DETECTOR,
+                null, null, today.minusDays(10), null));
+        InstrumentResponse gauge = instruments.create(new InstrumentRequest("M-" + random(), "Gauge", InstrumentKind.MEASURING, null, null,
+                null, null));
+        InstrumentResponse retiredPole = instruments.create(new InstrumentRequest("PT-" + random(), "Old pole", InstrumentKind.EARTHING_POLE,
+                null, null, today.minusDays(1), null));
+        instruments.deactivate(retiredPole.id());
+        events.clear();
+
+        ExpiryWatchResult result = expiryWatch.check();
+
+        assertTrue(result.vehicleDocuments() >= 2);
+        assertTrue(result.calibrations() >= 2);
+        DomainEvent inspectionWarning = events.onlyAbout(inspection.id());
+        assertEquals("vehicle-document.expiring", inspectionWarning.entityName() + "." + inspectionWarning.eventName());
+        Map<String, Object> document = new LinkedHashMap<>();
+        document.put("vehicleId", vehicle.id().toString());
+        document.put("vehicleCode", vehicle.code());
+        document.put("vehicleName", "Vehicle");
+        document.put("kind", "RAIL_INSPECTION");
+        document.put("reference", "RI-7");
+        document.put("expiresOn", today.plusDays(30).toString());
+        document.put("daysLeft", 30);
+        assertEquals(document, inspectionWarning.values());
+        DomainEvent insuranceWarning = events.onlyAbout(insurance.id());
+        assertEquals("expired", insuranceWarning.eventName());
+        assertEquals(-2, insuranceWarning.values().get("daysLeft"));
+        assertEquals(List.of(), events.about(far.id()), "31 days is beyond the warning");
+        assertEquals(List.of(), events.about(ofRetired.id()), "A retired vehicle is not warned about");
+
+        DomainEvent poleWarning = events.onlyAbout(pole.id());
+        assertEquals("calibration.expiring", poleWarning.entityName() + "." + poleWarning.eventName());
+        Map<String, Object> calibration = new LinkedHashMap<>();
+        calibration.put("instrumentId", pole.id().toString());
+        calibration.put("code", pole.code());
+        calibration.put("name", "Earthing pole");
+        calibration.put("kind", "EARTHING_POLE");
+        calibration.put("serialNumber", "EP-77");
+        calibration.put("calibrationExpiresOn", today.plusDays(1).toString());
+        calibration.put("daysLeft", 1);
+        assertEquals(calibration, poleWarning.values());
+        assertEquals(UUID.nameUUIDFromBytes(("calibration:expiring:" + pole.id() + ":" + today.plusDays(1)).getBytes(StandardCharsets.UTF_8)),
+                events.operationIdOf(poleWarning));
+        assertEquals("expired", events.onlyAbout(detector.id()).eventName());
+        assertEquals(List.of(), events.about(gauge.id()), "Without a calibration nothing expires");
+        assertEquals(List.of(), events.about(retiredPole.id()));
+
+        events.clear();
+        expiryWatch.check();
+        for (UUID id : List.of(inspection.id(), insurance.id(), pole.id(), detector.id())) {
+            assertEquals(List.of(), events.about(id), "Once for each expiry date");
+        }
+    }
+
     // ------------------------------------------------------------------------ historial
 
     @Test
@@ -1518,6 +1701,29 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
 
         List<String> names() {
             return published.stream().map(event -> event.entityName() + "." + event.eventName()).toList();
+        }
+
+        /** Lo publicado sobre esa entidad (su {@code entityId}). */
+        List<DomainEvent> about(UUID entityId) {
+            return published.stream().filter(event -> event.entityId().equals(entityId.toString())).toList();
+        }
+
+        DomainEvent onlyAbout(UUID entityId) {
+            List<DomainEvent> matching = about(entityId);
+            assertEquals(1, matching.size(), "Published about " + entityId + ": " + matching);
+            return matching.getFirst();
+        }
+
+        /** El {@code operationId} con el que se publico ese evento. */
+        UUID operationIdOf(DomainEvent event) {
+            synchronized (published) {
+                for (int index = 0; index < published.size(); index++) {
+                    if (published.get(index) == event) {
+                        return operationIds.get(index);
+                    }
+                }
+            }
+            throw new AssertionError("Not published: " + event);
         }
 
         DomainEvent only(String name) {

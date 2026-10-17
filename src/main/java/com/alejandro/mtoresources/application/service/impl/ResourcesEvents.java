@@ -1,6 +1,7 @@
 package com.alejandro.mtoresources.application.service.impl;
 
 import com.alejandro.mtoresources.application.dto.messaging.DomainEvent;
+import com.alejandro.mtoresources.domain.model.ExpiryRules;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Instrument;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnit;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Person;
@@ -10,6 +11,7 @@ import com.alejandro.mtoresources.infrastructure.persistence.entity.Vehicle;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleDocument;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleType;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -31,14 +33,21 @@ import java.util.UUID;
  * La marca de agua de un consumidor es la cabecera {@code sequenceNumber} del outbox, no
  * {@code version}: cambiar el jefe de una supervision cambia sus equipos sin tocar su version.</p>
  *
- * <p>Todos llevan {@code republished}: {@code true} solo en lo que publica {@code republish}, que
- * repite lo que ya se conto para poner al dia a un consumidor (una instantanea lo aplica igual; quien
- * avisa de cambios, como {@code mto-notification}, no avisa de nada). Los de vehiculo llevan ademas
- * {@code availabilityChanged}: si ese cambio hizo que el vehiculo pasara de disponible a no disponible o
- * al reves, para que un aviso de «fuera de servicio» salga una vez y no con cada cambio de notas.</p>
+ * <p>Los de personas, equipos, vehiculos e instrumentos llevan {@code republished}: {@code true} solo en
+ * lo que publica {@code republish}, que repite lo que ya se conto para poner al dia a un consumidor (una
+ * instantanea lo aplica igual; quien avisa de cambios, como {@code mto-notification}, no avisa de nada).
+ * Los de vehiculo llevan ademas {@code availabilityChanged}: si ese cambio hizo que el vehiculo pasara de
+ * disponible a no disponible o al reves, para que un aviso de «fuera de servicio» salga una vez y no con
+ * cada cambio de notas.</p>
  *
- * <p>Una lista (las cualificaciones de una persona, los documentos de un vehiculo) viaja siempre entera: quien guarda una instantanea
- * sustituye la que tenia por la que llega. Las fechas viajan como texto ISO ({@code 2027-03-31}).</p>
+ * <p>Una lista (las cualificaciones de una persona, los documentos de un vehiculo) viaja siempre entera:
+ * quien guarda una instantanea sustituye la que tenia por la que llega. Las fechas viajan como texto ISO
+ * ({@code 2027-03-31}).</p>
+ *
+ * <p>Los avisos de caducidad ({@code qualification}, {@code vehicle-document}, {@code calibration}, con
+ * {@code expiring} y {@code expired}) no son una instantanea sino un hecho de un dia: no se republican, los
+ * publica solo el vigilante diario y su {@code operationId} sale de lo que cuentan
+ * ({@link #expiryOperationId}).</p>
  */
 public final class ResourcesEvents {
 
@@ -46,10 +55,17 @@ public final class ResourcesEvents {
     public static final String TEAM = "team";
     public static final String VEHICLE = "vehicle";
     public static final String INSTRUMENT = "instrument";
+    public static final String QUALIFICATION = "qualification";
+    public static final String VEHICLE_DOCUMENT = "vehicle-document";
+    public static final String CALIBRATION = "calibration";
 
     public static final String CREATED = "created";
     public static final String UPDATED = "updated";
     public static final String DEACTIVATED = "deactivated";
+    /** Caduca dentro de los dias de aviso (o hoy mismo) y aun vale. */
+    public static final String EXPIRING = "expiring";
+    /** Ya no vale: desde el dia siguiente al de su caducidad. */
+    public static final String EXPIRED = "expired";
 
     private ResourcesEvents() {
     }
@@ -235,6 +251,69 @@ public final class ResourcesEvents {
         values.put("version", instrument.getVersion());
         values.put("republished", republished);
         return new DomainEvent(INSTRUMENT, id(instrument.getId()), eventName, values);
+    }
+
+    // ---------------------------------------------------------------------------- caducidades
+
+    /**
+     * El aviso de que una cualificacion caduca o ha caducado, para la persona, su jefe de equipo y quien
+     * gestiona el personal. {@code teamCode} es el equipo abierto de la persona (como lineman o como jefe) y
+     * {@code leader}, el jefe de ese equipo; nunca la propia persona: si ella es el jefe, nulo.
+     */
+    public static DomainEvent qualificationExpiry(PersonQualification qualification, String eventName, LocalDate today, String teamCode,
+                                                  Person leader) {
+        Person person = qualification.getPerson();
+        QualificationType type = qualification.getQualificationType();
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("personId", id(person.getId()));
+        values.put("personCode", person.getCode());
+        values.put("fullName", person.fullName());
+        values.put("username", person.getUsername());
+        values.put("qualificationCode", type.getCode());
+        values.put("qualificationName", type.getName());
+        values.put("kind", name(type.getKind()));
+        values.put("expiresOn", date(qualification.getExpiresOn()));
+        values.put("daysLeft", ExpiryRules.daysLeft(qualification.getExpiresOn(), today));
+        values.put("teamCode", teamCode);
+        values.put("leader", leader == null || leader.getId().equals(person.getId()) ? null : personRef(leader));
+        return new DomainEvent(QUALIFICATION, id(qualification.getId()), eventName, values);
+    }
+
+    /** El aviso de que un documento de un vehiculo caduca o ha caducado. */
+    public static DomainEvent vehicleDocumentExpiry(VehicleDocument document, String eventName, LocalDate today) {
+        Vehicle vehicle = document.getVehicle();
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("vehicleId", id(vehicle.getId()));
+        values.put("vehicleCode", vehicle.getCode());
+        values.put("vehicleName", vehicle.getName());
+        values.put("kind", name(document.getKind()));
+        values.put("reference", document.getReference());
+        values.put("expiresOn", date(document.getExpiresOn()));
+        values.put("daysLeft", ExpiryRules.daysLeft(document.getExpiresOn(), today));
+        return new DomainEvent(VEHICLE_DOCUMENT, id(document.getId()), eventName, values);
+    }
+
+    /** El aviso de que la calibracion de un instrumento caduca o ha caducado; su id es el del instrumento. */
+    public static DomainEvent calibrationExpiry(Instrument instrument, String eventName, LocalDate today) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("instrumentId", id(instrument.getId()));
+        values.put("code", instrument.getCode());
+        values.put("name", instrument.getName());
+        values.put("kind", name(instrument.getKind()));
+        values.put("serialNumber", instrument.getSerialNumber());
+        values.put("calibrationExpiresOn", date(instrument.getCalibrationExpiresOn()));
+        values.put("daysLeft", ExpiryRules.daysLeft(instrument.getCalibrationExpiresOn(), today));
+        return new DomainEvent(CALIBRATION, id(instrument.getId()), eventName, values);
+    }
+
+    /**
+     * El {@code operationId} de un aviso de caducidad: {@code UUID.nameUUIDFromBytes("<entidad>:<evento>:<id>:<caducidad>")}.
+     * Dos instancias, o una segunda pasada que llegara a publicar, publican el mismo y el inbox del
+     * consumidor descarta el duplicado; una renovacion es otra fecha y otro aviso.
+     */
+    public static UUID expiryOperationId(DomainEvent event, LocalDate expiresOn) {
+        String key = event.entityName() + ":" + event.eventName() + ":" + event.entityId() + ":" + expiresOn;
+        return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8));
     }
 
     private static String id(UUID id) {

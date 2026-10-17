@@ -3,7 +3,9 @@
 Spring Boot 4 / Java 25 REST API for the **people, the organization and the fleet** of the MTO domain
 (railway catenary): who works, who leads whom (project → department → chief supervision → supervision
 → team, a team being one team leader and 2 to 6 linemen in one vehicle), and the rail, road-rail and
-road vehicles with their characteristics and where each one is.
+road vehicles with their characteristics and where each one is; and until when: the qualifications of
+every person, the documents of every vehicle and the calibration of every instrument, with a daily warning
+of what expires.
 
 It is shared by [`mto-maintenance`](https://github.com/alexwarrior1991/mto-maintenance) (and
 tomorrow `mto-construction`), published through

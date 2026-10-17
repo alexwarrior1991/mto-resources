@@ -10,7 +10,10 @@ Every person has a record (with or without a Keycloak user) and a category (`WOR
 `SUPERVISOR`, `CHIEF_SUPERVISOR`, `CHIEF_MAINTENANCE`, `CHIEF_CONSTRUCTION`, `PROJECT_MANAGER`); the
 organization is a tree (project → department → chief supervision → supervision → team) where **a team
 works in one vehicle with one team leader, always, and 2 to 6 linemen**; the fleet is rail-only,
-road-rail and road-only vehicles of a model, with where each one is at every moment.
+road-rail and road-only vehicles of a model, with where each one is at every moment, and the calibrated
+instruments. What expires (the qualifications of every person, the documents of every vehicle, the
+calibration of every instrument) is kept here with its dates and warned about every day; whether
+something expired enters a shift is decided by `mto-maintenance`.
 
 Read `docs/` in order: `00-project-overview.md` … `07-auditing.md`. Those documents plus this file are
 the source of truth; `03-database.md` documents the schema and should be checked before changing
@@ -59,7 +62,9 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
   merge-patch, `PreferHeader`/`OperationResponses`, the exception handler, `actuator/RepublishEndpoint`),
   `messaging/rabbitmq` (`MaintenanceEventConsumer`), `messaging/outbox` (copy of `mto-configuration`'s).
 - `configuration` — security, `rabbitmq`, `messaging` (signature), `outbox`, `async` (virtual threads,
-  `OperationsProperties`, the scheduler of the background operations), JPA auditing, OpenAPI, `Clock`.
+  `OperationsProperties`, the scheduler of the background operations), `expiry` (`ExpiryWatchProperties`,
+  `app.resources.expiry.*`: `enabled`, `cron` in UTC, `warning-days` 30; the daily scheduler of
+  `ExpiryWatchService`, only with the broker on, off in `application-test.yml`), JPA auditing, OpenAPI, `Clock`.
 
 ### Rules that must not be broken
 
@@ -78,6 +83,13 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
 - **`vehicle_position` moves only through `VehiclePositionRepository.moveTo`**, the native upsert with
   the `observed_at` watermark inside the statement; never read-then-write. `vehicle_location_event` is
   append-only.
+- **An expiry is warned about once per expiry date**: `ExpiryWatchService` writes the mark
+  (`expiring_notified_for` / `expired_notified_for` of `person_qualification`, `vehicle_document` and
+  `instrument`) with native SQL and the condition inside the statement (`is distinct from :expiresOn`), and
+  publishes only when it changed one row, in the same transaction, with an `operationId` derived from what
+  it tells (`ResourcesEvents.expiryOperationId`). Hibernate never writes the marks (`insertable = false,
+  updatable = false`), they are `@NotAudited` and do not bump `version`. Expired is from the day after
+  the expiry date (`ExpiryRules`).
 - **Where a vehicle can be is decided by its mobility** (`FleetRules`): a rail-only vehicle is never on
   the road and is parked on a track; a road-only one is never on the track; an attached one is towed by
   one with `TOWING` on the same way or carried by a road vehicle (or anything, if portable), and is read
@@ -109,7 +121,8 @@ denied. A new role goes to `SecurityRoles` **and** `keycloak/mto-resources-parti
 ### Messaging
 
 Publishes `person` (with all its `qualifications`), `team`, `vehicle` (with all its `documents` and the
-qualification its model asks of the driver) and `instrument` (`created`/`updated`/`deactivated`) on
+qualification its model asks of the driver) and `instrument` (`created`/`updated`/`deactivated`), and the
+daily expiry warnings `qualification`, `vehicle-document` and `calibration` (`expiring`/`expired`), on
 `mto.resources.exchange` through the outbox, inside the business transaction; declares no queue (`mto-maintenance` and
 `mto-notification` declare theirs). What `republish` publishes carries `republished: true`, and a vehicle
 event says whether that change moved its availability (`availabilityChanged`): `mto-notification` notices
@@ -128,7 +141,8 @@ One class per layer; add methods, not classes. `BusinessLayerTest` runs the **se
 PostgreSQL** with the whole context and a `@Primary` `RecordingEventPublisher` — on purpose, unlike
 `mto-maintenance`: the rules here are rules of rows (locks, partial indexes, the position watermark),
 which a mocked repository would accept without testing; every case creates its own data with random
-codes because the database is shared. `DomainModelTest`, `ApiAuthorizationRulesTest` (probe controllers
+codes because the database is shared (the expiry watcher, called by hand, sees everyone's rows: a case
+looks only at the events about its own ids). `DomainModelTest`, `ApiAuthorizationRulesTest` (probe controllers
 on the real routes, and the `@PreAuthorize` of every real `PUT`/`PATCH` whose body can say
 `active=false`), `SecurityLayerTest`, `MessagingLayerTest` (the consumer), `MessagingContractExamplesTest`,
 `JpaEntityModelTest`, `MtoResourcesApplicationTests` (the whole context with Tomcat, and that requests
