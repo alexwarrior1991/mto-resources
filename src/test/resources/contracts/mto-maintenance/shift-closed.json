@@ -1,0 +1,69 @@
+{
+  "operationId": "a0000000-0000-4000-8000-00000000000b",
+  "referenceId": "shift-90000000-0000-4000-8000-000000000001",
+  "origin": "mto-maintenance",
+  "creationDate": "2026-09-29T09:00:00Z",
+  "eventType": "MAINTENANCE_SHIFT_CLOSED",
+  "data": {
+    "entityName": "shift",
+    "entityId": "90000000-0000-4000-8000-000000000001",
+    "eventName": "closed",
+    "values": {
+      "code": "SH-000077",
+      "status": "CLOSED",
+      "shiftDate": "2026-09-29",
+      "possessionType": "PARTIAL",
+      "teamId": "30000000-0000-4000-8000-000000000001",
+      "teamCode": "EQ-1",
+      "teamName": "Equipo noche 1",
+      "baseName": "Base Herzliya",
+      "vehicle": "Dresina 3",
+      "trackIds": [
+        2
+      ],
+      "executionPackageId": 6,
+      "startKp": 12847.990,
+      "endKp": 14078.090,
+      "plannedStart": "2026-09-29T22:00:00Z",
+      "plannedEnd": "2026-09-30T04:00:00Z",
+      "actualStart": "2026-09-29T22:05:00Z",
+      "actualEnd": "2026-09-30T03:50:00Z",
+      "voltageCutoffAt": "2026-09-29T22:20:00Z",
+      "netWorkMinutes": 330,
+      "parkingPlace": "Herzliya siding",
+      "vehicles": [
+        {
+          "id": "f0000000-0000-4000-8000-000000000002",
+          "code": "DR-02",
+          "parking": {
+            "siteId": null,
+            "trackId": 31,
+            "kp": 4.250,
+            "description": "Siding north of Herzliya"
+          }
+        }
+      ],
+      "vehicleIds": [
+        "f0000000-0000-4000-8000-000000000002"
+      ],
+      "vehicleCodes": [
+        "DR-02"
+      ],
+      "teamLeaderPersonId": "c0000000-0000-4000-8000-000000000003",
+      "teamLeaderUsername": "equipo.jefe",
+      "supervisorPersonId": "c0000000-0000-4000-8000-000000000002",
+      "linemanPersonIds": [
+        "c0000000-0000-4000-8000-000000000010",
+        "c0000000-0000-4000-8000-000000000011",
+        "c0000000-0000-4000-8000-000000000012"
+      ]
+    }
+  },
+  "messageHash": "ae3637584dabbd3402c63e3755907487b8d02603d21604e11df1400c44d9c0fb",
+  "actor": {
+    "id": "6f1b1c8e-0000-4000-8000-000000000031",
+    "username": "mantenimiento.tecnico",
+    "kind": "PERSON"
+  },
+  "correlationId": "8c3b8c1a-1111-4222-8333-444444444444"
+}

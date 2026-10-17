@@ -1,0 +1,181 @@
+{
+  "users": [
+    {
+      "username": "recursos.lector",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Rita",
+      "lastName": "Lectora",
+      "email": "recursos.lector@mto.local",
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "local",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "mto-resources-viewer"
+      ]
+    },
+    {
+      "username": "recursos.gestor",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Gabriel",
+      "lastName": "Gestor",
+      "email": "recursos.gestor@mto.local",
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "local",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "mto-resources-manager"
+      ]
+    },
+    {
+      "username": "recursos.responsable",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Raquel",
+      "lastName": "Responsable",
+      "email": "recursos.responsable@mto.local",
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "local",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "mto-resources-admin"
+      ]
+    },
+    {
+      "username": "equipo.operario",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Olga",
+      "lastName": "Operaria",
+      "email": "equipo.operario@mto.local",
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "local",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "mto-position-worker"
+      ],
+      "groups": [
+        "/EQ-NORTE"
+      ]
+    },
+    {
+      "username": "equipo.jefe",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Jorge",
+      "lastName": "Jefe",
+      "email": "equipo.jefe@mto.local",
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "local",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "mto-position-team-leader"
+      ],
+      "groups": [
+        "/EQ-NORTE"
+      ]
+    },
+    {
+      "username": "equipo.supervisor",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Sergio",
+      "lastName": "Supervisor",
+      "email": "equipo.supervisor@mto.local",
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "local",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "mto-position-supervisor"
+      ]
+    },
+    {
+      "username": "equipo.jefe-supervisores",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Silvia",
+      "lastName": "Supervisora",
+      "email": "equipo.jefe-supervisores@mto.local",
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "local",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "mto-position-chief-supervisor"
+      ]
+    },
+    {
+      "username": "mantenimiento.jefe",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Manuel",
+      "lastName": "Mantenimiento",
+      "email": "mantenimiento.jefe@mto.local",
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "local",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "mto-position-chief-maintenance"
+      ]
+    },
+    {
+      "username": "proyecto.jefe",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Pablo",
+      "lastName": "Proyecto",
+      "email": "proyecto.jefe@mto.local",
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "local",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "mto-position-project-manager"
+      ]
+    }
+  ]
+}
