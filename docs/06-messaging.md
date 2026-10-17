@@ -16,9 +16,9 @@ publisher confirms. With `app.rabbitmq.enabled=false` the publisher is the `NoOp
 
 | Event | `values` |
 |---|---|
-| `person.created`, `person.updated`, `person.deactivated` | `code`, `firstName`, `lastName`, `fullName`, `username`, `employeeNumber`, `category`, `employer`, `company`, `active`, `version`. Never the phone. |
-| `team.created`, `team.updated`, `team.deactivated` | `code`, `name`, `discipline`, `active`, `parentId`, `departmentId`, `executionPackageIds`, `defaultVehicle {id, code}`, `leader`, `supervisor` (head of the nearest supervision above), `chiefSupervisor`, `members` (each person as `{personId, code, fullName, username, category}`), `linemen`, `version` |
-| `vehicle.created`, `vehicle.updated`, `vehicle.deactivated` | `code`, `name`, `type {id, code, name, mobility, category, selfPropelled, portable, seats, railGearType, transportModeAuthorised, capabilities}`, `registrationPlate`, `railVehicleNumber`, `operationalStatus`, `available`, `active`, `version` |
+| `person.created`, `person.updated`, `person.deactivated` | `code`, `firstName`, `lastName`, `fullName`, `username`, `employeeNumber`, `category`, `employer`, `company`, `active`, `version`, `republished`. Never the phone. |
+| `team.created`, `team.updated`, `team.deactivated` | `code`, `name`, `discipline`, `active`, `parentId`, `departmentId`, `executionPackageIds`, `defaultVehicle {id, code}`, `leader`, `supervisor` (head of the nearest supervision above), `chiefSupervisor`, `members` (each person as `{personId, code, fullName, username, category}`), `linemen`, `version`, `republished` |
+| `vehicle.created`, `vehicle.updated`, `vehicle.deactivated` | `code`, `name`, `type {id, code, name, mobility, category, selfPropelled, portable, seats, railGearType, transportModeAuthorised, capabilities}`, `registrationPlate`, `railVehicleNumber`, `operationalStatus`, `available`, `active`, `version`, `availabilityChanged`, `republished` |
 
 One example per event in `messaging/examples/`, built by `MessagingContractExamplesTest` with
 `ResourcesEvents` and the real factory. **Keys are only added**; a new key or event changes its
@@ -36,13 +36,19 @@ example in the same commit (`MESSAGING_EXAMPLES_WRITE=true` regenerates them).
   parent of a unit → every team under it; the linemen of a team → that team; a vehicle model → its
   vehicles.
 - **`updated` is an upsert**: `republish` publishes `updated` (or `deactivated`) of things the consumer
-  may never have seen.
+  may never have seen. What it publishes carries `republished: true` (everything else, `false`): a
+  snapshot applies it like any other, and whoever tells people about changes (`mto-notification`)
+  ignores it, because nothing changed.
+- **`availabilityChanged`** (vehicles): `true` only when that change took the vehicle from available to
+  not available or back (out of service, back in service, retired while available). A model change, an
+  arrival or a republication say `false`, so that a notice of «out of service» goes out once.
 - **Only what someone listens to is published**: the outbox publishes with `mandatory=true`, and an
   event without a queue fails and blocks its aggregate. Locations are not published until someone
   consumes them (then as `vehicle-position`).
-- **Deployment order**: first `mto-maintenance`, which declares its queue
-  (`mto.maintenance.resources.queue`, bound to `mto.resources.{person,team,vehicle}.*`), then this
-  service; and `POST /actuator/republish` to load it.
+- **Deployment order**: first the consumers, which declare their queues — `mto-maintenance`
+  (`mto.maintenance.resources.queue`, bound to `mto.resources.{person,team,vehicle}.*`) and
+  `mto-notification` (`mto.notification.resources.queue`, bound to `mto.resources.#`, which records
+  every event in the activity log) — then this service; and `POST /actuator/republish` to load them.
 
 ## Consumed: the shifts of `mto-maintenance`
 

@@ -33,10 +33,12 @@
       "operationalStatus": "UNDER_REPAIR",
       "available": false,
       "active": true,
-      "version": 1
+      "version": 1,
+      "availabilityChanged": true,
+      "republished": false
     }
   },
-  "messageHash": "87047ba29cf451c99dbcb258c88bfd11268c6561325a9cf36fe57fecbe2ae80f",
+  "messageHash": "02f76f3a20e9407beedd71d38423b608c335157cbda76d5a14ff6ffe28b07a92",
   "actor": {
     "id": "6f1b1c8e-0000-4000-8000-000000000051",
     "username": "recursos.gestor",

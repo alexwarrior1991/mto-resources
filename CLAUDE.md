@@ -105,7 +105,10 @@ denied. A new role goes to `SecurityRoles` **and** `keycloak/mto-resources-parti
 ### Messaging
 
 Publishes `person`, `team` and `vehicle` (`created`/`updated`/`deactivated`) on `mto.resources.exchange`
-through the outbox, inside the business transaction; declares no queue. Consumes
+through the outbox, inside the business transaction; declares no queue (`mto-maintenance` and
+`mto-notification` declare theirs). What `republish` publishes carries `republished: true`, and a vehicle
+event says whether that change moved its availability (`availabilityChanged`): `mto-notification` notices
+people of changes, not of republications nor of every note. Consumes
 `mto.maintenance.shift.*` on its own queue `mto.resources.maintenance.queue` (DLX/DLQ) through the
 idempotent inbox. **Keys are only added**; a new key or event changes its example in
 `docs/messaging/examples/` in the same commit. The other way round, the shift examples of

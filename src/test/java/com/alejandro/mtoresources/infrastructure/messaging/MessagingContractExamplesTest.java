@@ -133,8 +133,9 @@ class MessagingContractExamplesTest {
         vehicle.setOperationalStatus(VehicleOperationalStatus.UNDER_REPAIR);
         vehicle.setStatusReason("Hydraulic leak on the crane");
         ReflectionTestUtils.setField(vehicle, "version", 1L);
+        // Pasa a reparacion: deja de estar disponible, y eso es lo que avisa mto-notification.
         check("vehicle-updated.json", "b0000000-0000-4000-8000-000000000008", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.vehicle(vehicle, ResourcesEvents.UPDATED));
+                ResourcesEvents.vehicle(vehicle, ResourcesEvents.UPDATED, true, false));
     }
 
     @Test
@@ -143,7 +144,7 @@ class MessagingContractExamplesTest {
         vehicle.setActive(false);
         ReflectionTestUtils.setField(vehicle, "version", 2L);
         check("vehicle-deactivated.json", "b0000000-0000-4000-8000-000000000009", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.vehicle(vehicle, ResourcesEvents.DEACTIVATED));
+                ResourcesEvents.vehicle(vehicle, ResourcesEvents.DEACTIVATED, true, false));
     }
 
     // ----------------------------------------------------------------------------- fixtures

@@ -414,6 +414,8 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         DomainEvent event = events.only("vehicle.created");
         assertEquals("RAIL_ONLY", ((Map<?, ?>) event.values().get("type")).get("mobility"));
         assertEquals(true, event.values().get("available"));
+        assertEquals(false, event.values().get("availabilityChanged"), "An arrival changes nobody's availability");
+        assertEquals(false, event.values().get("republished"));
     }
 
     @Test
@@ -423,9 +425,28 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         events.clear();
         VehicleResponse repaired = vehicles.patch(vehicle.id(), MergePatch.of(vehicleUpdate(VehicleOperationalStatus.UNDER_REPAIR, "Hydraulic leak")));
         assertFalse(repaired.available());
-        assertEquals(false, events.only("vehicle.updated").values().get("available"));
+        DomainEvent outOfService = events.only("vehicle.updated");
+        assertEquals(false, outOfService.values().get("available"));
+        assertEquals(true, outOfService.values().get("availabilityChanged"), "Out of service: a notice says so once");
+
+        events.clear();
+        vehicles.patch(vehicle.id(), MergePatch.of(vehicleUpdate(VehicleOperationalStatus.UNDER_REPAIR, "Hydraulic leak, parts ordered")));
+        assertEquals(false, events.only("vehicle.updated").values().get("availabilityChanged"), "Still out of service: nothing new to tell");
+
+        events.clear();
         VehicleResponse back = vehicles.patch(vehicle.id(), MergePatch.of(vehicleUpdate(VehicleOperationalStatus.OPERATIONAL, null)));
         assertNull(back.statusReason(), "Back to work, the old reason goes");
+        assertEquals(true, events.only("vehicle.updated").values().get("availabilityChanged"), "Back in service");
+    }
+
+    @Test
+    void retiringAnAvailableVehicleChangesItsAvailability() {
+        VehicleResponse vehicle = railVehicle(Set.of());
+        events.clear();
+        vehicles.deactivate(vehicle.id());
+        DomainEvent retired = events.only("vehicle.deactivated");
+        assertEquals(true, retired.values().get("availabilityChanged"));
+        assertEquals(false, retired.values().get("available"));
     }
 
     @Test
@@ -447,6 +468,8 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         DomainEvent event = events.only("vehicle.updated");
         assertEquals(vehicle.id().toString(), event.entityId());
         assertEquals(9, ((Map<?, ?>) event.values().get("type")).get("seats"));
+        assertEquals(false, event.values().get("availabilityChanged"), "Its model changed, not whether it can work");
+        assertEquals(false, event.values().get("republished"));
     }
 
     // ------------------------------------------------------------------------ ubicacion
@@ -663,6 +686,10 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         assertEquals(1, events.names().stream().filter("team.updated"::equals).count());
         assertEquals(1, events.names().stream().filter("vehicle.updated"::equals).count());
         assertEquals(events.operationIds.size(), Set.copyOf(events.operationIds).size(), "A new operationId for every event");
+        assertTrue(events.published.stream().allMatch(event -> Boolean.TRUE.equals(event.values().get("republished"))),
+                "Everything it tells again says so, so that nobody is notified of it");
+        assertTrue(events.published.stream().filter(event -> event.entityName().equals("vehicle"))
+                .allMatch(event -> Boolean.FALSE.equals(event.values().get("availabilityChanged"))));
     }
 
     // ---------------------------------------------------------------- operaciones de fondo

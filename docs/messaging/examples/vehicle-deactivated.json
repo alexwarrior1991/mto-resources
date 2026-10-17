@@ -33,10 +33,12 @@
       "operationalStatus": "OPERATIONAL",
       "available": false,
       "active": false,
-      "version": 2
+      "version": 2,
+      "availabilityChanged": true,
+      "republished": false
     }
   },
-  "messageHash": "70e6703af2f0065782ec7fcf5adb09d073a3bf75fedbfc9c56b55821894f2c05",
+  "messageHash": "96c9afa09b1b62759c439fd68702de156dbe27c0f0584c5de2b51284ee34275a",
   "actor": {
     "id": "6f1b1c8e-0000-4000-8000-000000000051",
     "username": "recursos.gestor",

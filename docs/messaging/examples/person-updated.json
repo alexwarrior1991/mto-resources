@@ -19,10 +19,11 @@
       "employer": "OWN",
       "company": null,
       "active": true,
-      "version": 1
+      "version": 1,
+      "republished": false
     }
   },
-  "messageHash": "c72d42fa768f7127e3c9267473269851e442fc6133d8b125e0c40167d618767e",
+  "messageHash": "fa00b457cfdc019ad9896e9fc246e11439c60f669d781fdce71943a0e49f644e",
   "actor": {
     "id": "6f1b1c8e-0000-4000-8000-000000000051",
     "username": "recursos.gestor",

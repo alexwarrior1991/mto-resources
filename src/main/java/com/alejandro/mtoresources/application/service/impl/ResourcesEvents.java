@@ -24,6 +24,12 @@ import java.util.UUID;
  * ({@link DomainEvent} lo rechaza). Un valor nulo viaja como nulo: «sin supervisor» es informacion.
  * La marca de agua de un consumidor es la cabecera {@code sequenceNumber} del outbox, no
  * {@code version}: cambiar el jefe de una supervision cambia sus equipos sin tocar su version.</p>
+ *
+ * <p>Todos llevan {@code republished}: {@code true} solo en lo que publica {@code republish}, que
+ * repite lo que ya se conto para poner al dia a un consumidor (una instantanea lo aplica igual; quien
+ * avisa de cambios, como {@code mto-notification}, no avisa de nada). Los de vehiculo llevan ademas
+ * {@code availabilityChanged}: si ese cambio hizo que el vehiculo pasara de disponible a no disponible o
+ * al reves, para que un aviso de «fuera de servicio» salga una vez y no con cada cambio de notas.</p>
  */
 public final class ResourcesEvents {
 
@@ -41,6 +47,10 @@ public final class ResourcesEvents {
     // ------------------------------------------------------------------------------- people
 
     public static DomainEvent person(Person person, String eventName) {
+        return person(person, eventName, false);
+    }
+
+    public static DomainEvent person(Person person, String eventName, boolean republished) {
         Map<String, Object> values = new LinkedHashMap<>();
         values.put("code", person.getCode());
         values.put("firstName", person.getFirstName());
@@ -53,6 +63,7 @@ public final class ResourcesEvents {
         values.put("company", person.getCompany());
         values.put("active", person.getActive());
         values.put("version", person.getVersion());
+        values.put("republished", republished);
         return new DomainEvent(PERSON, id(person.getId()), eventName, values);
     }
 
@@ -67,6 +78,10 @@ public final class ResourcesEvents {
     }
 
     public static DomainEvent team(TeamView view, String eventName) {
+        return team(view, eventName, false);
+    }
+
+    public static DomainEvent team(TeamView view, String eventName, boolean republished) {
         OrganizationUnit team = view.team();
         Map<String, Object> values = new LinkedHashMap<>();
         values.put("code", team.getCode());
@@ -95,6 +110,7 @@ public final class ResourcesEvents {
         values.put("members", members);
         values.put("linemen", members.size());
         values.put("version", team.getVersion());
+        values.put("republished", republished);
         return new DomainEvent(TEAM, id(team.getId()), eventName, values);
     }
 
@@ -114,6 +130,15 @@ public final class ResourcesEvents {
     // ----------------------------------------------------------------------------- vehicles
 
     public static DomainEvent vehicle(Vehicle vehicle, String eventName) {
+        return vehicle(vehicle, eventName, false, false);
+    }
+
+    /**
+     * @param availabilityChanged si el cambio que se cuenta paso el vehiculo de disponible a no disponible
+     *                            o al reves (un alta, un cambio de su modelo o una republicacion no lo hacen)
+     * @param republished         si es una republicacion de lo ya contado
+     */
+    public static DomainEvent vehicle(Vehicle vehicle, String eventName, boolean availabilityChanged, boolean republished) {
         VehicleType type = vehicle.getType();
         Map<String, Object> values = new LinkedHashMap<>();
         values.put("code", vehicle.getCode());
@@ -137,6 +162,8 @@ public final class ResourcesEvents {
         values.put("available", vehicle.isAvailable());
         values.put("active", vehicle.getActive());
         values.put("version", vehicle.getVersion());
+        values.put("availabilityChanged", availabilityChanged);
+        values.put("republished", republished);
         return new DomainEvent(VEHICLE, id(vehicle.getId()), eventName, values);
     }
 

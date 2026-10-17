@@ -94,7 +94,7 @@ class RepublishServiceImpl implements RepublishService {
     private int people(Collection<UUID> ids) {
         Integer published = transactions.execute(status -> {
             List<Person> people = personRepository.lockAllInIdOrder(ids);
-            people.forEach(person -> events.publish(ResourcesEvents.person(person, eventName(person.getActive()))));
+            people.forEach(person -> events.publish(ResourcesEvents.person(person, eventName(person.getActive()), true)));
             return people.size();
         });
         return published == null ? 0 : published;
@@ -103,8 +103,8 @@ class RepublishServiceImpl implements RepublishService {
     private int teams(Collection<UUID> ids) {
         Integer published = transactions.execute(status -> {
             List<OrganizationUnit> teams = lookups.lockTeams(ids);
-            lookups.publishTeams(teams.stream().filter(team -> Boolean.TRUE.equals(team.getActive())).toList(), ResourcesEvents.UPDATED);
-            lookups.publishTeams(teams.stream().filter(team -> !Boolean.TRUE.equals(team.getActive())).toList(), ResourcesEvents.DEACTIVATED);
+            lookups.republishTeams(teams.stream().filter(team -> Boolean.TRUE.equals(team.getActive())).toList(), ResourcesEvents.UPDATED);
+            lookups.republishTeams(teams.stream().filter(team -> !Boolean.TRUE.equals(team.getActive())).toList(), ResourcesEvents.DEACTIVATED);
             return teams.size();
         });
         return published == null ? 0 : published;
@@ -113,7 +113,7 @@ class RepublishServiceImpl implements RepublishService {
     private int vehicles(Collection<UUID> ids) {
         Integer published = transactions.execute(status -> {
             List<Vehicle> vehicles = vehicleRepository.lockAllInIdOrder(ids);
-            vehicles.forEach(vehicle -> events.publish(ResourcesEvents.vehicle(vehicle, eventName(vehicle.getActive()))));
+            vehicles.forEach(vehicle -> events.publish(ResourcesEvents.vehicle(vehicle, eventName(vehicle.getActive()), false, true)));
             return vehicles.size();
         });
         return published == null ? 0 : published;

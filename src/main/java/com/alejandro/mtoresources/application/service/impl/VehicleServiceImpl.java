@@ -98,6 +98,7 @@ class VehicleServiceImpl implements VehicleService {
         // Bloqueada: un cambio de su modelo tambien la bloquea antes de publicar su evento.
         Vehicle vehicle = repository.findByIdForUpdate(id).orElseThrow(() -> new NotFoundException("Vehicle", id));
         StaleVersionException.check("Vehicle " + vehicle.getCode(), vehicle.getVersion(), values.version());
+        boolean wasAvailable = vehicle.isAvailable();
 
         if (values.isDeactivating()) {
             retire(vehicle);
@@ -135,7 +136,7 @@ class VehicleServiceImpl implements VehicleService {
         requireConsistent(vehicle);
 
         Vehicle saved = repository.saveAndFlush(vehicle);
-        events.publish(ResourcesEvents.vehicle(saved, ResourcesEvents.UPDATED));
+        events.publish(ResourcesEvents.vehicle(saved, ResourcesEvents.UPDATED, saved.isAvailable() != wasAvailable, false));
         return responses.vehicle(saved, positionRepository.findById(id).orElse(null));
     }
 
@@ -182,9 +183,10 @@ class VehicleServiceImpl implements VehicleService {
             throw new FleetRuleException("Vehicle " + vehicle.getCode() + " is the default vehicle of team " + String.join(", ", teams)
                     + ": give the team another one first");
         }
+        boolean wasAvailable = vehicle.isAvailable();
         vehicle.setActive(false);
         Vehicle saved = repository.saveAndFlush(vehicle);
-        events.publish(ResourcesEvents.vehicle(saved, ResourcesEvents.DEACTIVATED));
+        events.publish(ResourcesEvents.vehicle(saved, ResourcesEvents.DEACTIVATED, wasAvailable, false));
     }
 
     private VehicleType activeType(UUID typeId) {
