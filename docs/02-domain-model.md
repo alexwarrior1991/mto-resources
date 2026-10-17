@@ -88,11 +88,26 @@ access; road: speed and driving licence (`B`, `C`, `C_E`); capabilities (`CRANE`
 `WIRE_DRUM`, `OCS_MEASURING`, `TRACK_MEASURING`, `EARTHING`, `TOWING`, `CREW_CABIN`, `WORKSHOP`) with
 their figures. `FleetRules.typeViolation` keeps a model coherent (400 otherwise).
 
+A model also says the qualification its driver needs (`requiredDriverQualification`, a
+`QualificationType`, or none). A model created without saying it takes the one of its mobility
+(`FleetRules.defaultDriverQualification`): a self-propelled rail-only one, `RAIL-DRIVER`; a road-rail one,
+`RR-OPERATOR`; a road-only one, the licence it asks for (`LIC-B`, `LIC-C`, `LIC-CE`), or none. `V8` filled
+the existing models with the same rule. It can be changed or emptied; a retired qualification type is
+not asked for (409 `QUA-001`). Who checks that the crew of a shift has a distinct driver with it for
+every self-propelled vehicle is `mto-maintenance`.
+
 `Vehicle` is the **unit**: fleet code, model, registration plate (required if it runs on the road,
 absent if rail-only), rail vehicle number (required if its model may run on open track, absent if
 road-only), serial, year, owner, operational status (`OPERATIONAL`, `LIMITED`, `UNDER_REPAIR`,
 `OUT_OF_SERVICE`, with a reason unless operational), odometer and engine hours. **Available** means
 active and `OPERATIONAL` or `LIMITED`. The default vehicle of an active team is not retired.
+
+A vehicle has its **documents** (`VehicleDocument`), **one per kind**: the road inspection, the rail
+inspection, the insurance, the crane and the platform certificates, other. Each has a reference,
+`issuedOn` and an `expiresOn` that is always there (a document always expires; never before the issue);
+renewing it is changing that date, and one given by mistake is deleted. An expired document does not
+change whether the vehicle is available: whether it enters a shift is for `mto-maintenance` to decide,
+with the documents every vehicle event carries.
 
 ## Where each vehicle is
 

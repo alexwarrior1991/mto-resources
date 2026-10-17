@@ -1,6 +1,7 @@
 package com.alejandro.mtoresources.application.dto.fleet;
 
 import com.alejandro.mtoresources.application.dto.common.AuditMetadataResponse;
+import com.alejandro.mtoresources.application.dto.qualification.QualificationTypeSummary;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.DrivingLicence;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.RailGearType;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCapability;
@@ -21,7 +22,9 @@ import java.util.UUID;
  *  "category": "CATENARY_TOWER_CAR", "selfPropelled": true, "seats": 8, "trackGaugeMm": 1435,
  *  "maxSpeedTrackTransportKmh": 100, "transportModeAuthorised": true,
  *  "capabilities": ["ELEVATING_PLATFORM", "INSULATED_PLATFORM", "PANTOGRAPH", "CREW_CABIN"],
- *  "platformHeightM": 6.5, "platformInsulationKv": 30.0, "active": true, "version": 0, …}
+ *  "platformHeightM": 6.5, "platformInsulationKv": 30.0,
+ *  "requiredDriverQualification": {"id": "…", "code": "RAIL-DRIVER", "name": "Rail auxiliary vehicle driver", "kind": "VEHICLE_OPERATION"},
+ *  "active": true, "version": 0, …}
  * }</pre>
  */
 public record VehicleTypeResponse(
@@ -64,6 +67,7 @@ public record VehicleTypeResponse(
         BigDecimal platformInsulationKv,
         BigDecimal towingCapacityT,
         String notes,
+        QualificationTypeSummary requiredDriverQualification,
         Boolean active,
         Long version,
         AuditMetadataResponse audit

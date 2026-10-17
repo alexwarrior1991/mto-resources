@@ -6,6 +6,7 @@ import com.alejandro.mtoresources.infrastructure.persistence.entity.Person;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonQualification;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.QualificationType;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Vehicle;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleDocument;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleType;
 
 import java.time.LocalDate;
@@ -35,7 +36,7 @@ import java.util.UUID;
  * {@code availabilityChanged}: si ese cambio hizo que el vehiculo pasara de disponible a no disponible o
  * al reves, para que un aviso de «fuera de servicio» salga una vez y no con cada cambio de notas.</p>
  *
- * <p>Una lista (las cualificaciones de una persona) viaja siempre entera: quien guarda una instantanea
+ * <p>Una lista (las cualificaciones de una persona, los documentos de un vehiculo) viaja siempre entera: quien guarda una instantanea
  * sustituye la que tenia por la que llega. Las fechas viajan como texto ISO ({@code 2027-03-31}).</p>
  */
 public final class ResourcesEvents {
@@ -156,16 +157,20 @@ public final class ResourcesEvents {
 
     // ----------------------------------------------------------------------------- vehicles
 
-    public static DomainEvent vehicle(Vehicle vehicle, String eventName) {
-        return vehicle(vehicle, eventName, false, false);
+    public static DomainEvent vehicle(Vehicle vehicle, List<VehicleDocument> documents, String eventName) {
+        return vehicle(vehicle, documents, eventName, false, false);
     }
 
     /**
+     * @param documents           todos los del vehiculo, tambien los caducados; viajan enteros, como las
+     *                            cualificaciones de una persona
      * @param availabilityChanged si el cambio que se cuenta paso el vehiculo de disponible a no disponible
-     *                            o al reves (un alta, un cambio de su modelo o una republicacion no lo hacen)
+     *                            o al reves (un alta, un cambio de su modelo, de sus documentos o una
+     *                            republicacion no lo hacen)
      * @param republished         si es una republicacion de lo ya contado
      */
-    public static DomainEvent vehicle(Vehicle vehicle, String eventName, boolean availabilityChanged, boolean republished) {
+    public static DomainEvent vehicle(Vehicle vehicle, List<VehicleDocument> documents, String eventName, boolean availabilityChanged,
+                                      boolean republished) {
         VehicleType type = vehicle.getType();
         Map<String, Object> values = new LinkedHashMap<>();
         values.put("code", vehicle.getCode());
@@ -182,6 +187,8 @@ public final class ResourcesEvents {
         typeValues.put("railGearType", name(type.getRailGearType()));
         typeValues.put("transportModeAuthorised", type.getTransportModeAuthorised());
         typeValues.put("capabilities", type.getCapabilities().stream().map(Enum::name).sorted().toList());
+        QualificationType driver = type.getRequiredDriverQualification();
+        typeValues.put("requiredDriverQualification", driver == null ? null : driver.getCode());
         values.put("type", typeValues);
         values.put("registrationPlate", vehicle.getRegistrationPlate());
         values.put("railVehicleNumber", vehicle.getRailVehicleNumber());
@@ -191,7 +198,20 @@ public final class ResourcesEvents {
         values.put("version", vehicle.getVersion());
         values.put("availabilityChanged", availabilityChanged);
         values.put("republished", republished);
+        values.put("documents", documents.stream()
+                .sorted(Comparator.comparing((VehicleDocument document) -> document.getKind().name()))
+                .map(ResourcesEvents::documentRef)
+                .toList());
         return new DomainEvent(VEHICLE, id(vehicle.getId()), eventName, values);
+    }
+
+    /** Lo que un consumidor necesita de un documento para decidir si vale en una fecha. */
+    private static Map<String, Object> documentRef(VehicleDocument document) {
+        Map<String, Object> ref = new LinkedHashMap<>();
+        ref.put("kind", name(document.getKind()));
+        ref.put("reference", document.getReference());
+        ref.put("expiresOn", date(document.getExpiresOn()));
+        return ref;
     }
 
     private static String id(UUID id) {

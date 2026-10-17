@@ -18,7 +18,7 @@ publisher confirms. With `app.rabbitmq.enabled=false` the publisher is the `NoOp
 |---|---|
 | `person.created`, `person.updated`, `person.deactivated` | `code`, `firstName`, `lastName`, `fullName`, `username`, `employeeNumber`, `category`, `employer`, `company`, `active`, `version`, `republished`, `qualifications` (all of them, the expired ones too, by `code`: `{code, kind, drivingLicence, expiresOn}`, `expiresOn` null when it does not expire). Never the phone. |
 | `team.created`, `team.updated`, `team.deactivated` | `code`, `name`, `discipline`, `active`, `parentId`, `departmentId`, `executionPackageIds`, `defaultVehicle {id, code}`, `leader`, `supervisor` (head of the nearest supervision above), `chiefSupervisor`, `members` (each person as `{personId, code, fullName, username, category}`), `linemen`, `version`, `republished` |
-| `vehicle.created`, `vehicle.updated`, `vehicle.deactivated` | `code`, `name`, `type {id, code, name, mobility, category, selfPropelled, portable, seats, railGearType, transportModeAuthorised, capabilities}`, `registrationPlate`, `railVehicleNumber`, `operationalStatus`, `available`, `active`, `version`, `availabilityChanged`, `republished` |
+| `vehicle.created`, `vehicle.updated`, `vehicle.deactivated` | `code`, `name`, `type {id, code, name, mobility, category, selfPropelled, portable, seats, railGearType, transportModeAuthorised, capabilities, requiredDriverQualification}` (the code of the qualification its driver needs, or null), `registrationPlate`, `railVehicleNumber`, `operationalStatus`, `available`, `active`, `version`, `availabilityChanged`, `republished`, `documents` (all of them, the expired ones too, by `kind`: `{kind, reference, expiresOn}`) |
 
 One example per event in `messaging/examples/`, built by `MessagingContractExamplesTest` with
 `ResourcesEvents` and the real factory. **Keys are only added**; a new key or event changes its
@@ -37,9 +37,10 @@ example in the same commit (`MESSAGING_EXAMPLES_WRITE=true` regenerates them).
   vehicles; a qualification of a person (given, changed or removed) → that person, `person.updated` with
   the whole list (the person row is locked first, so the last event of a person carries every
   qualification); the kind or the licence of a qualification type → the people who hold it, locked in id
-  order.
-- **A list travels whole**: `qualifications` is every qualification of the person, and an event replaces
-  the list the consumer had. An event without the key (an older `mto-resources`) says nothing about it.
+  order; a document of a vehicle → that vehicle (`availabilityChanged=false`, the vehicle row locked first).
+- **A list travels whole**: `qualifications` (people) and `documents` (vehicles) are all of them, and an
+  event replaces the list the consumer had. An event without the key (an older `mto-resources`) says
+  nothing about it.
 - **`updated` is an upsert**: `republish` publishes `updated` (or `deactivated`) of things the consumer
   may never have seen. What it publishes carries `republished: true` (everything else, `false`): a
   snapshot applies it like any other, and whoever tells people about changes (`mto-notification`)

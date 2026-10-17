@@ -117,6 +117,17 @@ class ApiAuthorizationRulesTest {
     }
 
     @Test
+    void theDocumentsOfAVehicleAreFleetWriteAndRemovingOneIsDelete() throws Exception {
+        expect(get(API + "/vehicles/1/documents"), 200, SecurityRoles.RESOURCES_READ);
+        expect(post(API + "/vehicles/1/documents"), 200, SecurityRoles.RESOURCES_FLEET_WRITE);
+        expect(patch(API + "/vehicles/1/documents/2"), 200, SecurityRoles.RESOURCES_FLEET_WRITE);
+        expect(post(API + "/vehicles/1/documents"), 403, SecurityRoles.RESOURCES_WRITE, SecurityRoles.RESOURCES_LOCATION_WRITE,
+                SecurityRoles.RESOURCES_DELETE);
+        expect(delete(API + "/vehicles/1/documents/2"), 200, SecurityRoles.RESOURCES_DELETE);
+        expect(delete(API + "/vehicles/1/documents/2"), 403, SecurityRoles.RESOURCES_FLEET_WRITE);
+    }
+
+    @Test
     void recordingWhereAVehicleIsIsLocationWriteAndOnlyThat() throws Exception {
         expect(post(API + "/vehicles/1/locations"), 200, SecurityRoles.RESOURCES_LOCATION_WRITE);
         expect(post(API + "/vehicles/1/locations"), 403, SecurityRoles.RESOURCES_FLEET_WRITE, SecurityRoles.RESOURCES_WRITE);
@@ -197,19 +208,19 @@ class ApiAuthorizationRulesTest {
     @RequestMapping(SecurityConfiguration.API)
     static class Probes {
 
-        @GetMapping({"/people", "/vehicles/positions", "/qualification-types", "/people/{id}/qualifications"})
+        @GetMapping({"/people", "/vehicles/positions", "/qualification-types", "/people/{id}/qualifications", "/vehicles/{id}/documents"})
         String read() {
             return "ok";
         }
 
         @PostMapping({"/people", "/units", "/parking-sites", "/vehicles", "/vehicles/{id}/locations", "/units/{id}/members/{person}/leave",
-                "/undeclared", "/qualification-types", "/people/{id}/qualifications"})
+                "/undeclared", "/qualification-types", "/people/{id}/qualifications", "/vehicles/{id}/documents"})
         String create() {
             return "ok";
         }
 
         @PatchMapping({"/people/{id}", "/vehicles/{id}", "/vehicle-types/{id}", "/qualification-types/{id}",
-                "/people/{id}/qualifications/{qualification}"})
+                "/people/{id}/qualifications/{qualification}", "/vehicles/{id}/documents/{document}"})
         String patchIt(@PathVariable String id) {
             return "ok";
         }
@@ -219,7 +230,8 @@ class ApiAuthorizationRulesTest {
             return "ok";
         }
 
-        @DeleteMapping({"/people/{id}", "/vehicles/{id}", "/qualification-types/{id}", "/people/{id}/qualifications/{qualification}"})
+        @DeleteMapping({"/people/{id}", "/vehicles/{id}", "/qualification-types/{id}", "/people/{id}/qualifications/{qualification}",
+                "/vehicles/{id}/documents/{document}"})
         String remove(@PathVariable String id) {
             return "ok";
         }

@@ -22,6 +22,7 @@ import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleOpera
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleOwner;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehiclePosition;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleType;
+import com.alejandro.mtoresources.infrastructure.persistence.repository.VehicleDocumentRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.VehiclePositionRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.VehicleRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.VehicleTypeRepository;
@@ -50,6 +51,7 @@ class VehicleServiceImpl implements VehicleService {
     private final VehicleRepository repository;
     private final VehicleTypeRepository typeRepository;
     private final VehiclePositionRepository positionRepository;
+    private final VehicleDocumentRepository documents;
     private final FleetResponses responses;
     private final EntityAuditService auditService;
     private final DomainEventPublisher events;
@@ -80,7 +82,8 @@ class VehicleServiceImpl implements VehicleService {
         requireConsistent(vehicle);
 
         Vehicle saved = repository.saveAndFlush(vehicle);
-        events.publish(ResourcesEvents.vehicle(saved, ResourcesEvents.CREATED));
+        // Un vehiculo nuevo aun no tiene documentos: se dan despues, en /vehicles/{id}/documents.
+        events.publish(ResourcesEvents.vehicle(saved, List.of(), ResourcesEvents.CREATED));
         return responses.vehicle(saved, null);
     }
 
@@ -136,7 +139,8 @@ class VehicleServiceImpl implements VehicleService {
         requireConsistent(vehicle);
 
         Vehicle saved = repository.saveAndFlush(vehicle);
-        events.publish(ResourcesEvents.vehicle(saved, ResourcesEvents.UPDATED, saved.isAvailable() != wasAvailable, false));
+        events.publish(ResourcesEvents.vehicle(saved, documents.findAllOfVehicle(id), ResourcesEvents.UPDATED,
+                saved.isAvailable() != wasAvailable, false));
         return responses.vehicle(saved, positionRepository.findById(id).orElse(null));
     }
 
@@ -186,7 +190,8 @@ class VehicleServiceImpl implements VehicleService {
         boolean wasAvailable = vehicle.isAvailable();
         vehicle.setActive(false);
         Vehicle saved = repository.saveAndFlush(vehicle);
-        events.publish(ResourcesEvents.vehicle(saved, ResourcesEvents.DEACTIVATED, wasAvailable, false));
+        events.publish(ResourcesEvents.vehicle(saved, documents.findAllOfVehicle(saved.getId()), ResourcesEvents.DEACTIVATED,
+                wasAvailable, false));
     }
 
     private VehicleType activeType(UUID typeId) {

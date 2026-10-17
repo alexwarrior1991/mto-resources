@@ -1,5 +1,6 @@
 package com.alejandro.mtoresources.domain.model;
 
+import com.alejandro.mtoresources.infrastructure.persistence.entity.DrivingLicence;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnitKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonCategory;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleAttachment;
@@ -198,5 +199,16 @@ class DomainModelTest {
         assertEquals(Optional.of(LocalDate.parse("2029-01-15")), ExpiryRules.defaultExpiry(issued, 36));
         assertEquals(Optional.empty(), ExpiryRules.defaultExpiry(null, 36));
         assertEquals(Optional.empty(), ExpiryRules.defaultExpiry(issued, null));
+    }
+
+    @Test
+    void aModelThatDoesNotSayItsDriverQualificationTakesTheOneOfItsMobility() {
+        assertEquals(Optional.of("RAIL-DRIVER"), FleetRules.defaultDriverQualification(VehicleMobility.RAIL_ONLY, true, null));
+        assertEquals(Optional.empty(), FleetRules.defaultDriverQualification(VehicleMobility.RAIL_ONLY, false, null), "A wagon is not driven");
+        assertEquals(Optional.of("RR-OPERATOR"), FleetRules.defaultDriverQualification(VehicleMobility.ROAD_RAIL, true, DrivingLicence.C));
+        assertEquals(Optional.of("LIC-B"), FleetRules.defaultDriverQualification(VehicleMobility.ROAD_ONLY, true, DrivingLicence.B));
+        assertEquals(Optional.of("LIC-C"), FleetRules.defaultDriverQualification(VehicleMobility.ROAD_ONLY, true, DrivingLicence.C));
+        assertEquals(Optional.of("LIC-CE"), FleetRules.defaultDriverQualification(VehicleMobility.ROAD_ONLY, true, DrivingLicence.C_E));
+        assertEquals(Optional.empty(), FleetRules.defaultDriverQualification(VehicleMobility.ROAD_ONLY, true, null));
     }
 }

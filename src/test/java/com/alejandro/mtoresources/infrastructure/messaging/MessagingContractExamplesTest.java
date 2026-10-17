@@ -20,6 +20,8 @@ import com.alejandro.mtoresources.infrastructure.persistence.entity.RailGearType
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Vehicle;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCapability;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCategory;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleDocument;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleDocumentKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleMobility;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleOperationalStatus;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleType;
@@ -135,8 +137,9 @@ class MessagingContractExamplesTest {
 
     @Test
     void vehicleCreated() throws IOException {
+        // Un vehiculo nuevo aun no tiene documentos: se le dan despues.
         check("vehicle-created.json", "b0000000-0000-4000-8000-000000000007", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.vehicle(roadRail(), ResourcesEvents.CREATED));
+                ResourcesEvents.vehicle(roadRail(), List.of(), ResourcesEvents.CREATED));
     }
 
     @Test
@@ -145,9 +148,10 @@ class MessagingContractExamplesTest {
         vehicle.setOperationalStatus(VehicleOperationalStatus.UNDER_REPAIR);
         vehicle.setStatusReason("Hydraulic leak on the crane");
         ReflectionTestUtils.setField(vehicle, "version", 1L);
-        // Pasa a reparacion: deja de estar disponible, y eso es lo que avisa mto-notification.
+        // Pasa a reparacion: deja de estar disponible, y eso es lo que avisa mto-notification. Sus documentos
+        // llegan en cualquier orden y viajan por tipo.
         check("vehicle-updated.json", "b0000000-0000-4000-8000-000000000008", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.vehicle(vehicle, ResourcesEvents.UPDATED, true, false));
+                ResourcesEvents.vehicle(vehicle, documents(vehicle), ResourcesEvents.UPDATED, true, false));
     }
 
     @Test
@@ -156,7 +160,7 @@ class MessagingContractExamplesTest {
         vehicle.setActive(false);
         ReflectionTestUtils.setField(vehicle, "version", 2L);
         check("vehicle-deactivated.json", "b0000000-0000-4000-8000-000000000009", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.vehicle(vehicle, ResourcesEvents.DEACTIVATED, true, false));
+                ResourcesEvents.vehicle(vehicle, documents(vehicle), ResourcesEvents.DEACTIVATED, true, false));
     }
 
     // ----------------------------------------------------------------------------- fixtures
@@ -201,11 +205,29 @@ class MessagingContractExamplesTest {
     private static Vehicle roadRail() {
         VehicleType type = VehicleType.builder().code("UNIMOG-RR").name("Unimog road-rail").mobility(VehicleMobility.ROAD_RAIL)
                 .category(VehicleCategory.ROAD_RAIL_TRUCK).seats(7).railGearType(RailGearType.RAIL_WHEEL_DRIVE)
-                .capabilities(EnumSet.of(VehicleCapability.TOWING, VehicleCapability.CRANE, VehicleCapability.CREW_CABIN)).build();
+                .capabilities(EnumSet.of(VehicleCapability.TOWING, VehicleCapability.CRANE, VehicleCapability.CREW_CABIN))
+                .requiredDriverQualification(roadRailOperator()).build();
         entity(type, "e0000000-0000-4000-8000-000000000001");
         Vehicle vehicle = Vehicle.builder().code("RR-07").name("Unimog 7").type(type).registrationPlate("12-345-67").build();
         entity(vehicle, "f0000000-0000-4000-8000-000000000007");
         return vehicle;
+    }
+
+    private static List<VehicleDocument> documents(Vehicle vehicle) {
+        VehicleDocument insurance = VehicleDocument.builder().vehicle(vehicle).kind(VehicleDocumentKind.INSURANCE).reference("POL-55120")
+                .expiresOn(LocalDate.parse("2026-12-31")).build();
+        entity(insurance, "a2000000-0000-4000-8000-000000000001");
+        VehicleDocument inspection = VehicleDocument.builder().vehicle(vehicle).kind(VehicleDocumentKind.ROAD_INSPECTION)
+                .reference("ITV-2026-118").expiresOn(LocalDate.parse("2027-02-28")).build();
+        entity(inspection, "a2000000-0000-4000-8000-000000000002");
+        return List.of(inspection, insurance);
+    }
+
+    private static QualificationType roadRailOperator() {
+        QualificationType type = QualificationType.builder().code("RR-OPERATOR").name("Road-rail machine operator")
+                .kind(QualificationKind.VEHICLE_OPERATION).build();
+        entity(type, "0195b000-0000-7000-8000-000000000105");
+        return type;
     }
 
     private static QualificationType railDriver() {

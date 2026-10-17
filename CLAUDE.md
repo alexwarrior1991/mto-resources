@@ -71,9 +71,9 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
   indexes) and is never both. A deactivated team releases its linemen and comes back with new ones.
 - **Every transaction that publishes a `team.updated` locks those team rows in id order first**
   (`OrganizationLookups.lockTeams`), before building the view; the same for the vehicles of a model, for
-  the people who hold a qualification type, for the person whose qualifications change
-  (`PersonRepository.findByIdForUpdate`: their event carries the whole list) and for what `republish`
-  publishes. The consumers' watermark is the outbox `sequenceNumber`, so its order
+  the people who hold a qualification type, for the person whose qualifications change and the vehicle
+  whose documents change (`findByIdForUpdate`: their event carries the whole list) and for what
+  `republish` publishes. The consumers' watermark is the outbox `sequenceNumber`, so its order
   must be the order of the commits. What republishes what is in `docs/06-messaging.md`.
 - **`vehicle_position` moves only through `VehiclePositionRepository.moveTo`**, the native upsert with
   the `observed_at` watermark inside the statement; never read-then-write. `vehicle_location_event` is
@@ -83,7 +83,8 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
   one with `TOWING` on the same way or carried by a road vehicle (or anything, if portable), and is read
   where its carrier is.
 - **A model is coherent with its mobility** (`FleetRules.typeViolation`); a vehicle carries what its
-  model needs (plate if it runs on the road, rail number if it may run on open track).
+  model needs (plate if it runs on the road, rail number if it may run on open track). A model that does
+  not say the qualification of its driver takes the one of its mobility (`FleetRules.defaultDriverQualification`).
 - **Permission ≠ position.** Keycloak profiles say what someone may do; the tree says whom they lead.
   This service never writes the realm. The position profiles (`mto-position-*`) live in
   `mto-platform/keycloak/mto-positions-cross-service.json`.
@@ -100,15 +101,16 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
 
 Resource server of the `mto` realm, audience `mto-resources-api`. Client roles `resources-read`,
 `resources-write` (people and their qualifications, units, linemen, parking sites, qualification types),
-`resources-fleet-write` (vehicles and models), `resources-location-write` (only `POST /vehicles/{id}/locations`), `resources-delete`
+`resources-fleet-write` (vehicles and their documents, models), `resources-location-write` (only `POST /vehicles/{id}/locations`), `resources-delete`
 (`DELETE`, and `PUT`/`PATCH` with `active=false` through `@PreAuthorize`), `ops-metrics`, `ops-write`;
 realm roles only as `ROLE_REALM_*`. No role implies another; anything undeclared under the API is
 denied. A new role goes to `SecurityRoles` **and** `keycloak/mto-resources-partial-import.json`.
 
 ### Messaging
 
-Publishes `person` (with all its `qualifications`), `team` and `vehicle` (`created`/`updated`/`deactivated`)
-on `mto.resources.exchange` through the outbox, inside the business transaction; declares no queue (`mto-maintenance` and
+Publishes `person` (with all its `qualifications`), `team` and `vehicle` (with all its `documents` and the
+qualification its model asks of the driver) (`created`/`updated`/`deactivated`) on `mto.resources.exchange`
+through the outbox, inside the business transaction; declares no queue (`mto-maintenance` and
 `mto-notification` declare theirs). What `republish` publishes carries `republished: true`, and a vehicle
 event says whether that change moved its availability (`availabilityChanged`): `mto-notification` notices
 people of changes, not of republications nor of every note. Consumes

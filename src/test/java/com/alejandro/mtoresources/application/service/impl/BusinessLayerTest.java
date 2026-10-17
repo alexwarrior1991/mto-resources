@@ -2,6 +2,9 @@ package com.alejandro.mtoresources.application.service.impl;
 
 import com.alejandro.mtoresources.application.dto.common.MergePatch;
 import com.alejandro.mtoresources.application.dto.fleet.FleetPositionResponse;
+import com.alejandro.mtoresources.application.dto.fleet.VehicleDocumentRequest;
+import com.alejandro.mtoresources.application.dto.fleet.VehicleDocumentResponse;
+import com.alejandro.mtoresources.application.dto.fleet.VehicleDocumentUpdateRequest;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleLocationRequest;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleRequest;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleResponse;
@@ -30,6 +33,7 @@ import com.alejandro.mtoresources.application.dto.qualification.PersonQualificat
 import com.alejandro.mtoresources.application.dto.qualification.PersonQualificationUpdateRequest;
 import com.alejandro.mtoresources.application.dto.qualification.QualificationTypeRequest;
 import com.alejandro.mtoresources.application.dto.qualification.QualificationTypeResponse;
+import com.alejandro.mtoresources.application.dto.qualification.QualificationTypeSummary;
 import com.alejandro.mtoresources.application.dto.qualification.QualificationTypeUpdateRequest;
 import com.alejandro.mtoresources.application.exception.DuplicateCodeException;
 import com.alejandro.mtoresources.application.exception.FleetRuleException;
@@ -46,6 +50,7 @@ import com.alejandro.mtoresources.application.service.PersonQualificationService
 import com.alejandro.mtoresources.application.service.PersonService;
 import com.alejandro.mtoresources.application.service.QualificationTypeService;
 import com.alejandro.mtoresources.application.service.RepublishService;
+import com.alejandro.mtoresources.application.service.VehicleDocumentService;
 import com.alejandro.mtoresources.application.service.VehicleLocationService;
 import com.alejandro.mtoresources.application.service.VehicleService;
 import com.alejandro.mtoresources.application.service.VehicleTypeService;
@@ -59,6 +64,7 @@ import com.alejandro.mtoresources.infrastructure.persistence.entity.RailGearType
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleAttachment;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCapability;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCategory;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleDocumentKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleLocationKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleLocationSource;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleMobility;
@@ -130,6 +136,7 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
     private static final UUID LICENCE_B = UUID.fromString("0195b000-0000-7000-8000-000000000101");
     private static final UUID LICENCE_CE = UUID.fromString("0195b000-0000-7000-8000-000000000103");
     private static final UUID RAIL_DRIVER = UUID.fromString("0195b000-0000-7000-8000-000000000104");
+    private static final UUID RR_OPERATOR = UUID.fromString("0195b000-0000-7000-8000-000000000105");
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -157,6 +164,8 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
     private QualificationTypeService qualificationTypes;
     @Autowired
     private PersonQualificationService personQualifications;
+    @Autowired
+    private VehicleDocumentService vehicleDocuments;
     @Autowired
     private VehicleService vehicles;
     @Autowired
@@ -488,12 +497,113 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         events.clear();
         types.patch(vehicle.type().id(), MergePatch.of(new VehicleTypeUpdateRequest(null, null, null, null, null, null, null, null, null, null,
                 null, null, null, 9, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null)));
+                null, null, null, null, null, null, null, null)));
         DomainEvent event = events.only("vehicle.updated");
         assertEquals(vehicle.id().toString(), event.entityId());
         assertEquals(9, ((Map<?, ?>) event.values().get("type")).get("seats"));
         assertEquals(false, event.values().get("availabilityChanged"), "Its model changed, not whether it can work");
         assertEquals(false, event.values().get("republished"));
+    }
+
+    // ------------------------------------------------- documentos y habilitacion del conductor
+
+    @Test
+    void aNewModelAsksForTheDriverQualificationOfItsMobilityUnlessItSaysAnother() {
+        assertEquals("RAIL-DRIVER", types.create(driverTypeRequest(VehicleMobility.RAIL_ONLY, VehicleCategory.CATENARY_TOWER_CAR, true,
+                null, null, null)).requiredDriverQualification().code());
+        assertNull(types.create(driverTypeRequest(VehicleMobility.RAIL_ONLY, VehicleCategory.RAIL_WAGON, false, null, null, null))
+                .requiredDriverQualification(), "A wagon is not driven");
+        assertEquals("RR-OPERATOR", types.create(driverTypeRequest(VehicleMobility.ROAD_RAIL, VehicleCategory.ROAD_RAIL_TRUCK, true,
+                RailGearType.RAIL_WHEEL_DRIVE, null, null)).requiredDriverQualification().code());
+        assertEquals("LIC-C", types.create(driverTypeRequest(VehicleMobility.ROAD_ONLY, VehicleCategory.CRANE_TRUCK, true, null,
+                DrivingLicence.C, null)).requiredDriverQualification().code());
+        assertNull(types.create(driverTypeRequest(VehicleMobility.ROAD_ONLY, VehicleCategory.VAN, true, null, null, null))
+                .requiredDriverQualification(), "A road model that asks for no licence");
+
+        QualificationTypeResponse mewp = qualificationType(QualificationKind.VEHICLE_OPERATION, null, null);
+        VehicleTypeResponse platform = types.create(driverTypeRequest(VehicleMobility.ROAD_RAIL, VehicleCategory.ROAD_RAIL_MEWP, true,
+                RailGearType.FRICTION_DRIVE, null, mewp.id()));
+        assertEquals(new QualificationTypeSummary(mewp.id(), mewp.code(), mewp.name(), QualificationKind.VEHICLE_OPERATION),
+                platform.requiredDriverQualification(), "What it says wins");
+        assertEquals("QTY-404", new GlobalExceptionHandler().handleNotFound(assertThrows(NotFoundException.class, () -> types.create(
+                driverTypeRequest(VehicleMobility.ROAD_ONLY, VehicleCategory.VAN, true, null, null, UUID.randomUUID()))),
+                new MockHttpServletRequest()).getBody().errorCode());
+        QualificationTypeResponse retired = qualificationType(QualificationKind.VEHICLE_OPERATION, null, null);
+        qualificationTypes.deactivate(retired.id());
+        assertThrows(QualificationRuleException.class, () -> types.create(driverTypeRequest(VehicleMobility.ROAD_ONLY, VehicleCategory.VAN,
+                true, null, null, retired.id())), "Nobody can get a retired one any more");
+
+        // Cambiarla republica sus vehiculos con el codigo nuevo; vaciarla, sin ninguno.
+        VehicleResponse vehicle = vehicles.create(vehicleRequest(platform.id(), "RR-" + random(), null));
+        events.clear();
+        types.patch(platform.id(), MergePatch.of(typeUpdate(RR_OPERATOR, null)));
+        assertEquals("RR-OPERATOR", ((Map<?, ?>) events.only("vehicle.updated").values().get("type")).get("requiredDriverQualification"));
+        events.clear();
+        VehicleTypeResponse none = types.patch(platform.id(), new MergePatch<>(typeUpdate(null, null),
+                Set.of("requiredDriverQualificationTypeId")));
+        assertNull(none.requiredDriverQualification());
+        DomainEvent cleared = events.only("vehicle.updated");
+        assertEquals(vehicle.id().toString(), cleared.entityId());
+        assertTrue(((Map<?, ?>) cleared.values().get("type")).containsKey("requiredDriverQualification"));
+        assertNull(((Map<?, ?>) cleared.values().get("type")).get("requiredDriverQualification"));
+    }
+
+    @Test
+    void aVehicleHasOneDocumentOfEachKindAndEveryChangePublishesTheVehicleWithAllOfThem() {
+        VehicleResponse vehicle = railVehicle(Set.of());
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        events.clear();
+
+        VehicleDocumentResponse inspection = vehicleDocuments.create(vehicle.id(), new VehicleDocumentRequest(
+                VehicleDocumentKind.RAIL_INSPECTION, " RI-118 ", today.minusYears(1), today.plusDays(60), null));
+        assertEquals("RI-118", inspection.reference());
+        assertEquals(vehicle.id(), inspection.vehicleId());
+        assertFalse(inspection.expired());
+        DomainEvent first = events.only("vehicle.updated");
+        assertEquals(false, first.values().get("availabilityChanged"), "A document does not change whether it can work");
+        assertEquals(List.of(documentValues("RAIL_INSPECTION", "RI-118", today.plusDays(60))), first.values().get("documents"));
+
+        events.clear();
+        VehicleDocumentResponse insurance = vehicleDocuments.create(vehicle.id(), new VehicleDocumentRequest(VehicleDocumentKind.INSURANCE,
+                "POL-7", null, today.minusDays(1), null));
+        assertTrue(insurance.expired());
+        assertEquals(List.of("INSURANCE", "RAIL_INSPECTION"), ((List<?>) events.only("vehicle.updated").values().get("documents")).stream()
+                .map(item -> ((Map<?, ?>) item).get("kind")).toList(), "By kind, the expired one too");
+        assertEquals(List.of(VehicleDocumentKind.INSURANCE, VehicleDocumentKind.RAIL_INSPECTION),
+                vehicleDocuments.findAll(vehicle.id()).stream().map(VehicleDocumentResponse::kind).toList());
+
+        DuplicateCodeException twice = assertThrows(DuplicateCodeException.class, () -> vehicleDocuments.create(vehicle.id(),
+                new VehicleDocumentRequest(VehicleDocumentKind.INSURANCE, null, null, today.plusYears(1), null)));
+        assertEquals("VDO-409", new GlobalExceptionHandler().handleDuplicateCode(twice, new MockHttpServletRequest()).getBody().errorCode());
+        assertThrows(ValidationException.class, () -> vehicleDocuments.create(vehicle.id(), new VehicleDocumentRequest(
+                VehicleDocumentKind.CRANE_CERTIFICATE, null, today, today.minusDays(1), null)), "It expires before it was issued");
+        assertThrows(ValidationException.class, () -> vehicleDocuments.patch(vehicle.id(), insurance.id(), new MergePatch<>(
+                new VehicleDocumentUpdateRequest(null, null, null, null, null), Set.of("expiresOn"))), "A document always expires");
+
+        // Renovarlo es cambiar su caducidad.
+        events.clear();
+        VehicleDocumentResponse renewed = vehicleDocuments.patch(vehicle.id(), insurance.id(), new MergePatch<>(
+                new VehicleDocumentUpdateRequest("POL-8", today, today.plusYears(1), null, insurance.version()), Set.of("notes")));
+        assertFalse(renewed.expired());
+        assertEquals(1, events.names().size());
+        assertThrows(StaleVersionException.class, () -> vehicleDocuments.patch(vehicle.id(), insurance.id(), MergePatch.of(
+                new VehicleDocumentUpdateRequest("X", null, null, null, insurance.version()))));
+        VehicleResponse other = railVehicle(Set.of());
+        assertEquals("VDO-404", new GlobalExceptionHandler().handleNotFound(assertThrows(NotFoundException.class,
+                () -> vehicleDocuments.delete(other.id(), insurance.id())), new MockHttpServletRequest()).getBody().errorCode());
+
+        // Cambiar el vehiculo tambien cuenta sus documentos.
+        events.clear();
+        vehicles.patch(vehicle.id(), MergePatch.of(vehicleUpdate(VehicleOperationalStatus.LIMITED, "Crane out of order")));
+        assertEquals(2, ((List<?>) events.only("vehicle.updated").values().get("documents")).size());
+
+        events.clear();
+        vehicleDocuments.delete(vehicle.id(), inspection.id());
+        assertEquals(List.of("INSURANCE"), ((List<?>) events.only("vehicle.updated").values().get("documents")).stream()
+                .map(item -> ((Map<?, ?>) item).get("kind")).toList());
+        assertEquals(List.of(0, 2), jdbc.queryForList("select revtype from vehicle_document_aud where id = ? order by rev", Integer.class,
+                inspection.id()), "Created and deleted, with what it was");
+        assertEquals(2, jdbc.queryForObject("select count(*) from vehicle_document_aud where id = ?", Integer.class, insurance.id()));
     }
 
     // ------------------------------------------------------------------------ ubicacion
@@ -523,7 +633,7 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         VehicleResponse towerCar = railVehicle(EnumSet.of(VehicleCapability.TOWING));
         VehicleTypeResponse wagonType = types.create(new VehicleTypeRequest("WG" + random(), "Flat wagon", null, null, VehicleMobility.RAIL_ONLY,
                 VehicleCategory.RAIL_WAGON, false, false, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, false, null, null, null, null, null, Set.of(), null, null, null, null, null, null, null));
+                null, null, false, null, null, null, null, null, Set.of(), null, null, null, null, null, null, null, null));
         VehicleResponse wagon = vehicles.create(vehicleRequest(wagonType.id(), null, null));
         VehicleResponse van = vehicles.create(vehicleRequest(types.create(typeRequest(VehicleMobility.ROAD_ONLY, VehicleCategory.VAN, null,
                 false, EnumSet.of(VehicleCapability.TOWING))).id(), "VN-" + random(), null));
@@ -1099,7 +1209,29 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
                                                   boolean transportMode, Set<VehicleCapability> capabilities) {
         return new VehicleTypeRequest("VT" + random(), "Model", null, null, mobility, category, true, false, null, null, null, null, null,
                 null, null, 8, null, null, null, null, null, null, null, null, transportMode, railGear, null, null, null, null,
-                capabilities, null, null, null, null, null, null, null);
+                capabilities, null, null, null, null, null, null, null, null);
+    }
+
+    private static VehicleTypeRequest driverTypeRequest(VehicleMobility mobility, VehicleCategory category, boolean selfPropelled,
+                                                        RailGearType railGear, DrivingLicence licence, UUID driver) {
+        return new VehicleTypeRequest("VT" + random(), "Model", null, null, mobility, category, selfPropelled, false, null, null, null, null,
+                null, null, null, 8, null, null, null, null, null, null, null, null, false, railGear, null, null, null, licence, Set.of(), null,
+                null, null, null, null, null, null, driver);
+    }
+
+    private static VehicleTypeUpdateRequest typeUpdate(UUID driver, Long version) {
+        return new VehicleTypeUpdateRequest(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, driver,
+                null, version);
+    }
+
+    /** Un documento como viaja en el evento de su vehiculo. */
+    private static Map<String, Object> documentValues(String kind, String reference, LocalDate expiresOn) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("kind", kind);
+        values.put("reference", reference);
+        values.put("expiresOn", expiresOn.toString());
+        return values;
     }
 
     private VehicleResponse railVehicle(Set<VehicleCapability> capabilities) {

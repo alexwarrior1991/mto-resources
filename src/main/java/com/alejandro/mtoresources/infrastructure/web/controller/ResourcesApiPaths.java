@@ -13,6 +13,7 @@ public final class ResourcesApiPaths {
     public static final String PERSON_QUALIFICATIONS = PEOPLE + "/{personId}/qualifications";
     public static final String VEHICLE_TYPES = BASE + "/vehicle-types";
     public static final String VEHICLES = BASE + "/vehicles";
+    public static final String VEHICLE_DOCUMENTS = VEHICLES + "/{vehicleId}/documents";
     public static final String OPERATIONS = BASE + "/operations";
 
     private ResourcesApiPaths() {

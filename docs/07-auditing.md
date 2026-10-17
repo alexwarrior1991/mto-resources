@@ -17,6 +17,7 @@ Two layers, answering different questions, both resolving the actor through `Aud
 | `TeamMember` | the linemen; a membership is closed, never deleted |
 | `Vehicle` | its model is read as it is now (`NOT_AUDITED` relation): models are a catalogue |
 | `PersonQualification` | its type is read as it is now (`NOT_AUDITED`); a deleted one keeps its data in the `DEL` revision (`store_data_at_delete`); the expiry marks are `@NotAudited` |
+| `VehicleDocument` | the same: a deleted one keeps its data, the expiry marks are not history |
 
 The seeded project and department have a `BASELINE` revision (`V7`): without it, reading the history
 of a unit under them would fail looking for its parent in `organization_unit_aud`.

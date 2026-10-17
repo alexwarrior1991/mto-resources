@@ -12,11 +12,13 @@ import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Modificacion de un modelo. Ni el codigo ni la movilidad cambian: un modelo de solo via no se vuelve
  * bivial, se da de alta otro. La categoria si, dentro de su movilidad. {@code capabilities} va entera:
- * la que llega sustituye a la anterior.
+ * la que llega sustituye a la anterior. {@code requiredDriverQualificationTypeId} a {@code null} (merge-patch)
+ * es que no exige ninguna.
  *
  * <p>Ejemplo, {@code PATCH /vehicle-types/{id}} con {@code application/merge-patch+json}:</p>
  * <pre>{@code
@@ -60,6 +62,7 @@ public record VehicleTypeUpdateRequest(
         @DecimalMin("0") @Digits(integer = 4, fraction = 1) BigDecimal platformInsulationKv,
         @DecimalMin("0") @Digits(integer = 6, fraction = 2) BigDecimal towingCapacityT,
         String notes,
+        UUID requiredDriverQualificationTypeId,
         Boolean active,
         Long version
 ) {

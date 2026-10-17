@@ -1,5 +1,6 @@
 package com.alejandro.mtoresources.domain.model;
 
+import com.alejandro.mtoresources.infrastructure.persistence.entity.DrivingLicence;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleAttachment;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCapability;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCategory;
@@ -133,6 +134,36 @@ public final class FleetRules {
             case CARRIED -> portable || carrierMobility.runsOnRoad() ? Optional.empty()
                     : Optional.of(vehicle + " is not portable: only a road vehicle (a low loader, a truck) carries it, and "
                     + carrier + " is " + carrierMobility);
+        };
+    }
+
+    // ------------------------------------------------------------- el conductor de un modelo
+
+    /** Conductor de vehiculo auxiliar de via. */
+    public static final String RAIL_DRIVER = "RAIL-DRIVER";
+    /** Operador de maquina bivial. */
+    public static final String ROAD_RAIL_OPERATOR = "RR-OPERATOR";
+
+    /**
+     * La habilitacion que exige conducir un modelo que no la dice, por su movilidad: una de solo via
+     * autopropulsada, conductor de vehiculo auxiliar; una bivial, operador de bivial; una de carretera, el
+     * permiso que pide. La misma regla rellena los modelos que ya existian (V8). Es el codigo del tipo de
+     * cualificacion; vacio, ninguna (un vagon, una vagoneta, una de carretera que no dice permiso).
+     */
+    public static Optional<String> defaultDriverQualification(VehicleMobility mobility, boolean selfPropelled, DrivingLicence licence) {
+        return switch (mobility) {
+            case RAIL_ONLY -> selfPropelled ? Optional.of(RAIL_DRIVER) : Optional.empty();
+            case ROAD_RAIL -> Optional.of(ROAD_RAIL_OPERATOR);
+            case ROAD_ONLY -> Optional.ofNullable(licence).map(FleetRules::licenceQualification);
+        };
+    }
+
+    /** El tipo de cualificacion de un permiso de conducir: {@code LIC-B}, {@code LIC-C}, {@code LIC-CE}. */
+    public static String licenceQualification(DrivingLicence licence) {
+        return switch (licence) {
+            case B -> "LIC-B";
+            case C -> "LIC-C";
+            case C_E -> "LIC-CE";
         };
     }
 }
