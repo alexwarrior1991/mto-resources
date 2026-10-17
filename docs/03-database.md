@@ -21,6 +21,7 @@ columns without a foreign key.
 | `V6` | `vehicle_type` (+ `vehicle_type_capability`), `parking_site`, `vehicle` (+ `_aud`), `vehicle_location_event`, `vehicle_position` |
 | `V7` | The seed: project `MTO` and department `MNT`, with a `BASELINE` revision |
 | `V8` | `qualification_type` (with its seeds), `person_qualification`, `vehicle_document`, `instrument` and their `_aud`; `vehicle_type.required_driver_qualification_type_id` with its backfill |
+| `V9` | `track_access_point` (the snapshot of the track access points of `mto-configuration`); `vehicle_location_event.access_point_id` |
 
 ## People and organization (`V5`)
 
@@ -47,7 +48,7 @@ The crew limits (2 to 6 linemen) are counted by the service with the team row lo
 | `vehicle_type_capability` | `type_id`, `capability` | primary key on both |
 | `parking_site` | `code`, `name`, `kind`, `execution_package_id`, `station_id`, `track_id`, `kp`, `rail_access`, `road_access`, `address`, `latitude`, `longitude`, `active` | rail or road access or both; rail access has a track; coordinates travel together and are in range |
 | `vehicle` | `code`, `name`, `type_id`, `registration_plate`, `rail_vehicle_number`, `serial_number`, `manufacture_year`, `owner`, `owner_company`, `operational_status`, `status_reason`, `odometer_km`, `engine_hours`, `active`, `version` | `code` unique; partial unique indexes on `upper(registration_plate)` and `upper(rail_vehicle_number)`; an owner other than `OWN` has a company |
-| `vehicle_location_event` | `vehicle_id`, `kind`, `parking_site_id`, `execution_package_id`, `track_id`, `kp`, `latitude`, `longitude`, `access_point`, `description`, `carrier_vehicle_id`, `attachment`, `source`, `source_reference`, `observed_at`, `recorded_at`, `recorded_by` | `ON_TRACK` has a track; `PARKED` says where; `ATTACHED` if and only if carrier and attachment; never attached to itself; index `(vehicle_id, observed_at DESC)` and on `source_reference` |
+| `vehicle_location_event` | `vehicle_id`, `kind`, `parking_site_id`, `execution_package_id`, `track_id`, `kp`, `latitude`, `longitude`, `access_point` (free text), `access_point_id` (`V9`), `description`, `carrier_vehicle_id`, `attachment`, `source`, `source_reference`, `observed_at`, `recorded_at`, `recorded_by` | `ON_TRACK` has a track; `PARKED` says where; `ATTACHED` if and only if carrier and attachment; never attached to itself; index `(vehicle_id, observed_at DESC)` and on `source_reference` |
 | `vehicle_position` | `vehicle_id` (primary key), `location_event_id` and the columns the board filters on | indexes on EP, track and carrier |
 
 Enums: `vehicle_mobility`, `vehicle_category` (19 values), `vehicle_power`, `rail_gear_type`,
@@ -81,6 +82,28 @@ expiring_notified_for is distinct from :expiresOn`, one row → publish): one wa
 however many instances run, and another one after a renewal. Hibernate reads them and never writes
 them (`insertable = false, updatable = false`), so saving the row never puts back a mark read before the
 warning; they do not bump `version` (they are not something a user edits) and are not audited.
+
+## Track access points (`V9`)
+
+| Table | Key columns | Constraints and indexes |
+|---|---|---|
+| `track_access_point` | `id` (`bigint`, the id of `mto-configuration`, not one of its own), `name` (200), `track_id`, `execution_package_id` (of its track), `station_id`, `kp` (`numeric(12,3)`, in metres as `mto-configuration` publishes it), `kind` (`varchar(30)`), `side` (`varchar(10)`), `road_rail_access`, `max_axle_load_t` and `max_gross_weight_t` (`numeric(8,3)`), `latitude`, `longitude`, `enabled`, `source_sequence_number`, `created_at`, `updated_at` | coordinates travel together; indexes on `(track_id, kp)` and `execution_package_id`. Track, EP and station ids without a foreign key, like everywhere else |
+| `vehicle_location_event.access_point_id` | where a road-rail vehicle on-tracked or off-tracked, from the catalogue (null: not said, or only as text in `access_point`) | foreign key to `track_access_point` (`ON DELETE RESTRICT`: a snapshot row is disabled, never deleted); partial index |
+
+`kind` and `side` are text and not PostgreSQL enums on purpose: they are another service's values, and a
+new one there must not make the upsert fail here.
+
+`track_access_point` is written only by `TrackAccessPointRepository`, with native SQL and the
+`sequenceNumber` watermark of `mto-configuration` (global in its outbox) inside the statement, never
+read-then-write: `upsertFromMasterData` is `INSERT ... ON CONFLICT (id) DO UPDATE ... WHERE
+track_access_point.source_sequence_number IS NULL OR excluded.source_sequence_number IS NULL OR
+excluded.source_sequence_number >= track_access_point.source_sequence_number`, keeping the stored
+watermark when the message has none (`coalesce`). A `DELETED` goes through the same upsert with
+`enabled = false` (so it advances the watermark, and one never seen before stays disabled instead of being
+brought back by a late creation); one whose `values` do not say the track, name, kind and side only
+disables a known row (`deactivateFromMasterData`). It has no `version` (nobody edits it through the API) and
+no `_aud` twin (`docs/07-auditing.md`). `vehicle_location_event` is not audited either, so its new column has
+no twin to change.
 
 ## Background operations (`V4`)
 

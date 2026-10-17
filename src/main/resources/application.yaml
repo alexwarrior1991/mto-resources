@@ -151,6 +151,17 @@ app:
       dead-letter-queue: ${APP_RABBITMQ_FIELD_DEAD_LETTER_QUEUE:mto.resources.field.queue.dlq}
       dead-letter-routing-key: ${APP_RABBITMQ_FIELD_DEAD_LETTER_ROUTING_KEY:mto.resources.field.queue.dlq}
       listener-enabled: ${APP_RABBITMQ_FIELD_LISTENER_ENABLED:true}
+    # Lo que se escucha de mto-configuration: solo los puntos de acceso a la via, que las reglas de la flota
+    # miran al registrar donde encarrila una bivial. El exchange y la clave son contrato del emisor; la cola
+    # y su DLQ son de aqui.
+    master-data:
+      exchange: ${APP_RABBITMQ_MASTER_DATA_EXCHANGE:mto.master-data.exchange}
+      queue: ${APP_RABBITMQ_MASTER_DATA_QUEUE:mto.resources.master-data.queue}
+      routing-key: "${APP_RABBITMQ_MASTER_DATA_ROUTING_KEY:mto.master-data.track-access-point.*}"
+      dead-letter-exchange: ${APP_RABBITMQ_MASTER_DATA_DEAD_LETTER_EXCHANGE:mto.resources.master-data.queue.dlx}
+      dead-letter-queue: ${APP_RABBITMQ_MASTER_DATA_DEAD_LETTER_QUEUE:mto.resources.master-data.queue.dlq}
+      dead-letter-routing-key: ${APP_RABBITMQ_MASTER_DATA_DEAD_LETTER_ROUTING_KEY:mto.resources.master-data.queue.dlq}
+      listener-enabled: ${APP_RABBITMQ_MASTER_DATA_LISTENER_ENABLED:true}
     # Exchange propio: personas, equipos y vehiculos, con la clave mto.resources.<entidad>.<evento>.
     # Solo se declara el exchange; las colas son de quien consume (mto-maintenance).
     events:

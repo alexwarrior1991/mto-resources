@@ -2,6 +2,7 @@ package com.alejandro.mtoresources.infrastructure.persistence.entity;
 
 import com.alejandro.mtoresources.infrastructure.messaging.outbox.OutboxMessage;
 import jakarta.persistence.Column;
+import org.hibernate.annotations.Immutable;
 import org.hibernate.envers.Audited;
 import org.hibernate.envers.NotAudited;
 import org.hibernate.envers.RelationTargetAuditMode;
@@ -33,10 +34,21 @@ class JpaEntityModelTest {
     @Test
     void cataloguesHistoriesAndNativeSqlTablesAreNotAudited() {
         for (Class<?> type : List.of(VehicleType.class, ParkingSite.class, QualificationType.class, VehicleLocationEvent.class,
-                VehiclePosition.class, InboxMessage.class, BackgroundOperation.class, OutboxMessage.class)) {
+                VehiclePosition.class, InboxMessage.class, BackgroundOperation.class, OutboxMessage.class, TrackAccessPoint.class)) {
             assertFalse(type.isAnnotationPresent(Audited.class), type.getSimpleName());
         }
         assertNull(AuditableEntity.class.getAnnotation(Audited.class), "On each entity, never on the base class");
+    }
+
+    /**
+     * La instantanea de los puntos de acceso de mto-configuration solo la escribe el SQL nativo con su marca de
+     * agua: ni se audita (Envers no lo veria) ni Hibernate la puede actualizar.
+     */
+    @Test
+    void theTrackAccessPointsAreASnapshotHibernateOnlyReads() {
+        assertFalse(TrackAccessPoint.class.isAnnotationPresent(Audited.class));
+        assertTrue(TrackAccessPoint.class.isAnnotationPresent(Immutable.class));
+        assertEquals(Object.class, TrackAccessPoint.class.getSuperclass(), "Not an AuditableEntity: only the master data writes it");
     }
 
     @Test

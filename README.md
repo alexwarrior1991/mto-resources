@@ -42,6 +42,16 @@ that adds keys to the events, like `V8`), republish people, teams, vehicles and 
 curl -X POST -H "Authorization: Bearer $OPS_TOKEN" http://localhost:8089/actuator/republish
 ```
 
+The other way round, the track access points of `mto-configuration` (what a road-rail vehicle on-tracks at,
+`GET /api/v1/resources/track-access-points`) arrive by its master-data channel on this service's own queue
+`mto.resources.master-data.queue`. What was published before that queue existed (the first deployment of
+`V9`) is loaded by republishing them there:
+
+```bash
+curl -X POST -H "Authorization: Bearer $CONFIG_TOKEN" \
+  "http://localhost:8081/api/v1/configuration/master-data/republish?entity=track-access-point"
+```
+
 ## Configuration
 
 Everything is read from the environment; `.env.example` lists every variable with its default. The ones

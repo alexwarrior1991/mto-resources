@@ -148,6 +148,22 @@ class ApiAuthorizationRulesTest {
         expect(patch(API + "/vehicles/1"), 403, SecurityRoles.RESOURCES_LOCATION_WRITE);
     }
 
+    /**
+     * Los puntos de acceso a la via se leen con {@code resources-read}, por la regla de todo {@code GET}, y no se
+     * escriben con ningun permiso: el maestro es de mto-configuration y llega por sus datos maestros.
+     */
+    @Test
+    void trackAccessPointsAreReadWithResourcesReadAndWrittenByNobody() throws Exception {
+        expect(get(API + "/track-access-points?trackId=3&enabled=true"), 200, SecurityRoles.RESOURCES_READ);
+        expect(get(API + "/track-access-points"), 403, SecurityRoles.RESOURCES_WRITE, SecurityRoles.RESOURCES_FLEET_WRITE,
+                SecurityRoles.RESOURCES_LOCATION_WRITE, SecurityRoles.RESOURCES_DELETE);
+        for (String role : new String[]{SecurityRoles.RESOURCES_WRITE, SecurityRoles.RESOURCES_FLEET_WRITE,
+                SecurityRoles.RESOURCES_LOCATION_WRITE, SecurityRoles.RESOURCES_READ}) {
+            expect(post(API + "/track-access-points"), 403, role);
+            expect(put(API + "/track-access-points/77"), 403, role);
+        }
+    }
+
     @Test
     void deletingIsResourcesDeleteAndWritingDoesNotImplyIt() throws Exception {
         expect(delete(API + "/people/1"), 200, SecurityRoles.RESOURCES_DELETE);
@@ -224,13 +240,14 @@ class ApiAuthorizationRulesTest {
     static class Probes {
 
         @GetMapping({"/people", "/vehicles/positions", "/qualification-types", "/people/{id}/qualifications", "/vehicles/{id}/documents",
-                "/instruments", "/instruments/{id}/revisions"})
+                "/instruments", "/instruments/{id}/revisions", "/track-access-points"})
         String read() {
             return "ok";
         }
 
         @PostMapping({"/people", "/units", "/parking-sites", "/vehicles", "/vehicles/{id}/locations", "/units/{id}/members/{person}/leave",
-                "/undeclared", "/qualification-types", "/people/{id}/qualifications", "/vehicles/{id}/documents", "/instruments"})
+                "/undeclared", "/qualification-types", "/people/{id}/qualifications", "/vehicles/{id}/documents", "/instruments",
+                "/track-access-points"})
         String create() {
             return "ok";
         }
@@ -241,7 +258,7 @@ class ApiAuthorizationRulesTest {
             return "ok";
         }
 
-        @PutMapping({"/units/{id}/members", "/qualification-types/{id}", "/instruments/{id}"})
+        @PutMapping({"/units/{id}/members", "/qualification-types/{id}", "/instruments/{id}", "/track-access-points/{id}"})
         String replace(@PathVariable String id) {
             return "ok";
         }

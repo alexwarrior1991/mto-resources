@@ -102,7 +102,7 @@ class FieldPositionHandler implements IncomingEventHandler {
         Instant observedAt = instant(values.get("observedAt")).filter(instant -> instant.isBefore(now)).orElse(now);
         VehicleLocationRequest request = new VehicleLocationRequest(VehicleLocationKind.ON_TRACK, null,
                 number(values.get("executionPackageId")).map(BigDecimal::longValue).orElse(null), trackId.get(),
-                number(values.get("kp")).orElse(null), null, null, null,
+                number(values.get("kp")).orElse(null), null, null, null, null,
                 text(values.get("code")).map(possession -> "Reported by the field device of possession " + possession).orElse(null),
                 null, null, observedAt);
         try {

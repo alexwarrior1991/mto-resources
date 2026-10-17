@@ -33,6 +33,8 @@ services:
       APP_RABBITMQ_ENABLED: ${APP_RABBITMQ_ENABLED:-true}
       # The shifts of mto-maintenance, which move the vehicles (docs/06-messaging.md).
       APP_RABBITMQ_MAINTENANCE_LISTENER_ENABLED: ${APP_RABBITMQ_MAINTENANCE_LISTENER_ENABLED:-true}
+      # The track access points of mto-configuration, which the fleet rules check when a location says one.
+      APP_RABBITMQ_MASTER_DATA_LISTENER_ENABLED: ${APP_RABBITMQ_MASTER_DATA_LISTENER_ENABLED:-true}
       SPRING_RABBITMQ_LISTENER_OBSERVATION_ENABLED: ${SPRING_RABBITMQ_LISTENER_OBSERVATION_ENABLED:-true}
       # Own events (people, teams, vehicles, instruments, expiry warnings), published from the outbox.
       APP_RABBITMQ_EVENTS_EXCHANGE: ${APP_RABBITMQ_EVENTS_EXCHANGE:-mto.resources.exchange}

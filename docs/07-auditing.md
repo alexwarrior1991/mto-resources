@@ -30,6 +30,7 @@ of a unit under them would fail looking for its parent in `organization_unit_aud
 | `VehicleType`, `ParkingSite`, `QualificationType` | catalogues of rare change |
 | `VehicleLocationEvent` | it is already the append-only history of the locations |
 | `VehiclePosition` | written only with native SQL, which Envers cannot see |
+| `TrackAccessPoint` | the snapshot of a master of `mto-configuration`, written only with native SQL from its events (`@Immutable` for Hibernate); its history is `mto-configuration`'s |
 | `InboxMessage`, `OutboxMessage`, `BackgroundOperation` | their history is themselves |
 
 `@Audited` goes on each entity and never on `AuditableEntity`. `JpaEntityModelTest` guards the split.

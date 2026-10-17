@@ -115,3 +115,40 @@ there): deploy this service first. The example `mto-field` versions
 (`docs/messaging/examples/position-reported.json` there) is copied in
 `src/test/resources/contracts/mto-field/` and `BusinessLayerTest` passes it through the real handler.
 
+## Consumed: the track access points of `mto-configuration`
+
+Queue `mto.resources.master-data.queue` (declared here, with its DLX `...queue.dlx` and DLQ
+`...queue.dlq`), bound to `mto.master-data.exchange` **only** with `mto.master-data.track-access-point.*`
+(`app.rabbitmq.master-data.*`): of the rest of the infrastructure this service keeps only ids, so it does
+not listen to `mto.master-data.#`. The consumer (`MasterDataEventConsumer`) checks the signature, that the
+envelope comes from `mto-configuration` and has `data`, `entityName` and `operation` (`CREATED`, `UPDATED`,
+`DELETED`; an unknown one cannot be read and goes to the DLQ); what has no remedy goes to the DLQ without
+retries. The envelope is the one of the master data (`data.operation` where the own events say
+`data.eventName`): it is turned into the common one with the operation in lower case as the event name, and
+goes through the same idempotent inbox (`source_service = mto-configuration`) and the same dispatcher to
+`TrackAccessPointMasterDataHandler`.
+
+`track-access-point` carries in `values`: `id`, `name`, `enabled`, `kp` (metres), `kind`, `side`,
+`roadRailAccess`, `maxAxleLoadT`, `maxGrossWeightT`, `latitude`, `longitude` (the decimals as JSON
+numbers), `station` (`{id, name}` or null) and `track` (`{id, name, executionPackageId}`, never null).
+`created` and `updated` upsert the snapshot `track_access_point` as it comes; `deleted` (a logical deletion
+there, with the same `values`) disables it. The watermark is the `sequenceNumber` header (global in the
+outbox of `mto-configuration`), compared inside the writing statement: an older event changes nothing, one
+without a sequence applies and keeps the stored one, and a deletion advances it too, so a late creation
+does not bring it back (`docs/03-database.md`). A `created`/`updated` without its id, name, track, kind or
+side cannot be applied: it fails, is retried and ends in the DLQ with the reason in the inbox.
+
+The example `mto-configuration` versions (`docs/messaging/examples/master-data-track-access-point-updated.json`
+there) is copied in `src/test/resources/contracts/mto-configuration/`: `MessagingLayerTest` reads it with the
+converter of the channel and `BusinessLayerTest` passes it through the real handler. A change of that
+example is copied here in the same change.
+
+**Deployment order**: unlike the positions of `mto-field`, this service does not have to be deployed before
+`mto-configuration` publishes access points: `mto.master-data.exchange` already has other queues bound to
+`mto.master-data.#` (those of `mto-stock`, `mto-maintenance` and `mto-notification`), so the `mandatory` of
+the publisher never fails because this queue is missing. But what is published before this queue exists
+does not reach it: once this service has declared its queue, load the snapshot by republishing the access
+points from `mto-configuration` (`POST /api/v1/configuration/master-data/republish?entity=track-access-point`,
+optionally `&trackId=`; `entity=all` includes them). The republication arrives as `UPDATED` and is applied
+like any other.
+

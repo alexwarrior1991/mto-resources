@@ -74,8 +74,14 @@ public class VehicleLocationEvent {
     @Column(name = "longitude", precision = 9, scale = 6, updatable = false)
     private BigDecimal longitude;
 
+    /** Texto libre: lo que se escribio antes del catalogo, o un sitio que no esta en el. */
     @Column(name = "access_point", length = 150, updatable = false)
     private String accessPoint;
+
+    /** Donde encarrilo o desencarrilo, del catalogo de {@code mto-configuration} (V9). */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "access_point_id", updatable = false, foreignKey = @ForeignKey(name = "fk_vehicle_location_event_access_point"))
+    private TrackAccessPoint trackAccessPoint;
 
     @Column(name = "description", length = 500, updatable = false)
     private String description;

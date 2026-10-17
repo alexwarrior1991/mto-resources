@@ -11,6 +11,7 @@ import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleMobil
 import com.alejandro.mtoresources.infrastructure.persistence.entity.WorkDiscipline;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -164,6 +165,53 @@ class DomainModelTest {
                 "DR-03", VehicleMobility.RAIL_ONLY, Set.of()).isPresent());
         assertTrue(FleetRules.attachmentViolation("VG-01", VehicleMobility.RAIL_ONLY, true, VehicleAttachment.CARRIED,
                 "DR-03", VehicleMobility.RAIL_ONLY, Set.of()).isEmpty(), "A portable trolley goes in anything");
+    }
+
+    // ------------------------------------------------------------- punto de acceso a la via
+
+    /**
+     * Encarrilar en un punto de acceso: habilitado, en la via de la ubicacion, que admita biviales si lo es el
+     * vehiculo, preparado si el modelo lo exige y que aguante su peso (solo si se conocen las dos cifras).
+     */
+    @Test
+    void anAccessPointIsEnabledOnTheTrackOfTheLocationAdmitsRoadRailAndTakesTheWeightOfTheModel() {
+        FleetRules.AccessPointShape prepared = access(true, 3L, "PREPARED_ACCESS", true, "12.500", "40.000");
+        BigDecimal gross = new BigDecimal("32.00");
+        BigDecimal axle = new BigDecimal("8.00");
+        assertTrue(FleetRules.accessPointViolation("RR-07", VehicleMobility.ROAD_RAIL, true, gross, axle, prepared, 3L).isEmpty());
+        assertTrue(FleetRules.accessPointViolation("RR-07", VehicleMobility.ROAD_RAIL, true, gross, axle, prepared, null).isEmpty(),
+                "A location without its track (ON_ROAD after off-tracking) is not compared");
+
+        assertEquals(Optional.of("Access point Acceso km 110+176 is disabled: no vehicle on-tracks or off-tracks there"),
+                FleetRules.accessPointViolation("RR-07", VehicleMobility.ROAD_RAIL, false, gross, axle,
+                        access(false, 3L, "PREPARED_ACCESS", true, null, null), 3L));
+        assertEquals(Optional.of("Access point Acceso km 110+176 is on track 3, not on track 4 of the location"),
+                FleetRules.accessPointViolation("RR-07", VehicleMobility.ROAD_RAIL, false, gross, axle, prepared, 4L));
+        FleetRules.AccessPointShape noRoadRail = access(true, 3L, "DEPOT", false, null, null);
+        assertEquals(Optional.of("Access point Acceso km 110+176 does not admit road-rail vehicles: RR-07 cannot on-track or off-track there"),
+                FleetRules.accessPointViolation("RR-07", VehicleMobility.ROAD_RAIL, false, gross, axle, noRoadRail, 3L));
+        assertTrue(FleetRules.accessPointViolation("DR-02", VehicleMobility.RAIL_ONLY, false, gross, axle, noRoadRail, 3L).isEmpty(),
+                "It says nothing of a rail-only vehicle");
+        FleetRules.AccessPointShape crossing = access(true, 3L, "LEVEL_CROSSING", true, null, null);
+        assertEquals(Optional.of("RR-07 needs a prepared access, and access point Acceso km 110+176 is a LEVEL_CROSSING"),
+                FleetRules.accessPointViolation("RR-07", VehicleMobility.ROAD_RAIL, true, gross, axle, crossing, 3L));
+        assertTrue(FleetRules.accessPointViolation("RR-07", VehicleMobility.ROAD_RAIL, false, gross, axle, crossing, 3L).isEmpty());
+        assertEquals(Optional.of("RR-07 weighs up to 44 t, more than the 40 t that access point Acceso km 110+176 takes"),
+                FleetRules.accessPointViolation("RR-07", VehicleMobility.ROAD_RAIL, true, new BigDecimal("44.00"), axle, prepared, 3L));
+        assertEquals(Optional.of("RR-07 has an axle load of up to 12.75 t, more than the 12.5 t that access point Acceso km 110+176 takes"),
+                FleetRules.accessPointViolation("RR-07", VehicleMobility.ROAD_RAIL, true, gross, new BigDecimal("12.75"), prepared, 3L));
+        assertTrue(FleetRules.accessPointViolation("RR-07", VehicleMobility.ROAD_RAIL, true, new BigDecimal("40.000"), new BigDecimal("12.5"),
+                prepared, 3L).isEmpty(), "Exactly the maximum fits");
+        assertTrue(FleetRules.accessPointViolation("RR-07", VehicleMobility.ROAD_RAIL, true, null, null, prepared, 3L).isEmpty(),
+                "A model without its weights is not compared");
+        assertTrue(FleetRules.accessPointViolation("RR-07", VehicleMobility.ROAD_RAIL, true, new BigDecimal("99"), new BigDecimal("99"),
+                access(true, 3L, "PREPARED_ACCESS", true, null, null), 3L).isEmpty(), "Nor an access point without its limits");
+    }
+
+    private static FleetRules.AccessPointShape access(boolean enabled, Long trackId, String kind, boolean roadRail, String maxAxleLoad,
+                                                      String maxGrossWeight) {
+        return new FleetRules.AccessPointShape("Acceso km 110+176", enabled, trackId, kind, roadRail,
+                maxAxleLoad == null ? null : new BigDecimal(maxAxleLoad), maxGrossWeight == null ? null : new BigDecimal(maxGrossWeight));
     }
 
     private static FleetRules.TypeShape shape(VehicleMobility mobility, VehicleCategory category, boolean railGear,

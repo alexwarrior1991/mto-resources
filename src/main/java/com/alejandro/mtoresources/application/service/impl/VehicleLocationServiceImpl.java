@@ -13,6 +13,7 @@ import com.alejandro.mtoresources.application.service.VehicleLocationService;
 import com.alejandro.mtoresources.configuration.AuditActorResolver;
 import com.alejandro.mtoresources.domain.model.FleetRules;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.ParkingSite;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.TrackAccessPoint;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Vehicle;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleLocationEvent;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleLocationKind;
@@ -20,6 +21,7 @@ import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleLocat
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehiclePosition;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleType;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.ParkingSiteRepository;
+import com.alejandro.mtoresources.infrastructure.persistence.repository.TrackAccessPointRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.VehicleLocationEventRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.VehiclePositionRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.VehicleRepository;
@@ -49,6 +51,7 @@ class VehicleLocationServiceImpl implements VehicleLocationService {
 
     private final VehicleRepository vehicleRepository;
     private final ParkingSiteRepository siteRepository;
+    private final TrackAccessPointRepository accessPointRepository;
     private final VehicleLocationEventRepository eventRepository;
     private final VehiclePositionRepository positionRepository;
     private final FleetResponses responses;
@@ -87,6 +90,7 @@ class VehicleLocationServiceImpl implements VehicleLocationService {
 
         VehicleLocationKind kind = request.kind();
         ParkingSite site = request.parkingSiteId() == null ? null : site(request.parkingSiteId());
+        TrackAccessPoint accessPoint = request.accessPointId() == null ? null : accessPoint(request.accessPointId());
         Long executionPackageId = request.executionPackageId();
         Long trackId = request.trackId();
         var kp = request.kp();
@@ -97,6 +101,11 @@ class VehicleLocationServiceImpl implements VehicleLocationService {
                 trackId = site.getTrackId();
                 kp = kp == null ? site.getKp() : kp;
             }
+        }
+        if (accessPoint != null && executionPackageId == null) {
+            // El EP de la via del acceso, para que el tablero lo encuentre por EP. La via y el kp no: los dice
+            // la ubicacion, y el acceso solo tiene que estar en esa via.
+            executionPackageId = accessPoint.getExecutionPackageId();
         }
         String description = SpecificationUtils.normalize(request.description());
 
@@ -119,6 +128,14 @@ class VehicleLocationServiceImpl implements VehicleLocationService {
                 .ifPresent(reason -> {
                     throw new FleetRuleException(reason);
                 });
+        if (accessPoint != null) {
+            VehicleType type = vehicle.getType();
+            FleetRules.accessPointViolation("Vehicle " + vehicle.getCode(), type.getMobility(), Boolean.TRUE.equals(type.getNeedsPreparedAccess()),
+                            type.getMaxGrossT(), type.getMaxAxleLoadT(), shape(accessPoint), trackId)
+                    .ifPresent(reason -> {
+                        throw new FleetRuleException(reason);
+                    });
+        }
 
         VehicleLocationEvent event = eventRepository.saveAndFlush(VehicleLocationEvent.builder()
                 .vehicle(vehicle)
@@ -130,6 +147,7 @@ class VehicleLocationServiceImpl implements VehicleLocationService {
                 .latitude(request.latitude())
                 .longitude(request.longitude())
                 .accessPoint(SpecificationUtils.normalize(request.accessPoint()))
+                .trackAccessPoint(accessPoint)
                 .description(description)
                 .carrier(carrier)
                 .attachment(carrier == null ? null : request.attachment())
@@ -216,6 +234,19 @@ class VehicleLocationServiceImpl implements VehicleLocationService {
 
     private Vehicle vehicle(UUID id) {
         return vehicleRepository.findById(id).orElseThrow(() -> new NotFoundException("Vehicle", id));
+    }
+
+    /** Un punto de acceso del catalogo de mto-configuration; uno que no ha llegado nunca es 404 {@code TAP-404}. */
+    private TrackAccessPoint accessPoint(Long id) {
+        return accessPointRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException(TrackAccessPointServiceImpl.AGGREGATE,
+                        TrackAccessPointServiceImpl.AGGREGATE + " with id " + id + " was not found"));
+    }
+
+    private static FleetRules.AccessPointShape shape(TrackAccessPoint accessPoint) {
+        return new FleetRules.AccessPointShape(accessPoint.getName(), Boolean.TRUE.equals(accessPoint.getEnabled()), accessPoint.getTrackId(),
+                accessPoint.getKind(), Boolean.TRUE.equals(accessPoint.getRoadRailAccess()), accessPoint.getMaxAxleLoadT(),
+                accessPoint.getMaxGrossWeightT());
     }
 
     private ParkingSite site(UUID id) {

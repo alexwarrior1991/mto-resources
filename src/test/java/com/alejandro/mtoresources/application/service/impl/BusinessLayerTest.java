@@ -3,10 +3,13 @@ package com.alejandro.mtoresources.application.service.impl;
 import com.alejandro.mtoresources.application.dto.common.MergePatch;
 import com.alejandro.mtoresources.application.dto.expiry.ExpiryWatchResult;
 import com.alejandro.mtoresources.application.dto.fleet.FleetPositionResponse;
+import com.alejandro.mtoresources.application.dto.fleet.TrackAccessPointResponse;
+import com.alejandro.mtoresources.application.dto.fleet.TrackAccessPointSummary;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleDocumentRequest;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleDocumentResponse;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleDocumentUpdateRequest;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleLocationRequest;
+import com.alejandro.mtoresources.application.dto.fleet.VehicleLocationResponse;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleRequest;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleResponse;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleTypeRequest;
@@ -18,6 +21,7 @@ import com.alejandro.mtoresources.application.dto.instrument.InstrumentUpdateReq
 import com.alejandro.mtoresources.application.dto.messaging.DomainEvent;
 import com.alejandro.mtoresources.application.dto.messaging.IncomingEvent;
 import com.alejandro.mtoresources.application.dto.messaging.IncomingEventContext;
+import com.alejandro.mtoresources.application.dto.messaging.MasterDataChangedMessage;
 import com.alejandro.mtoresources.application.dto.operation.OperationResponse;
 import com.alejandro.mtoresources.application.dto.operation.OperationStatus;
 import com.alejandro.mtoresources.application.dto.operation.RepublishResult;
@@ -56,6 +60,7 @@ import com.alejandro.mtoresources.application.service.PersonQualificationService
 import com.alejandro.mtoresources.application.service.PersonService;
 import com.alejandro.mtoresources.application.service.QualificationTypeService;
 import com.alejandro.mtoresources.application.service.RepublishService;
+import com.alejandro.mtoresources.application.service.TrackAccessPointService;
 import com.alejandro.mtoresources.application.service.VehicleDocumentService;
 import com.alejandro.mtoresources.application.service.VehicleLocationService;
 import com.alejandro.mtoresources.application.service.VehicleService;
@@ -188,6 +193,10 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
     private MaintenanceShiftEventHandler shiftHandler;
     @Autowired
     private FieldPositionHandler fieldHandler;
+    @Autowired
+    private TrackAccessPointMasterDataHandler accessPointHandler;
+    @Autowired
+    private TrackAccessPointService accessPoints;
     @Autowired
     private RepublishService republish;
     @Autowired
@@ -701,13 +710,13 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
         assertThrows(FleetRuleException.class, () -> locations.recordManual(vehicle.id(), location(VehicleLocationKind.ON_ROAD, null, now)));
         assertThrows(FleetRuleException.class, () -> locations.recordManual(vehicle.id(),
-                new VehicleLocationRequest(VehicleLocationKind.PARKED, null, null, null, null, null, null, null, "A car park", null, null, now)));
+                new VehicleLocationRequest(VehicleLocationKind.PARKED, null, null, null, null, null, null, null, null, "A car park", null, null, now)));
         assertThrows(ValidationException.class, () -> locations.recordManual(vehicle.id(), location(VehicleLocationKind.ON_TRACK, 14L,
                 now.plus(Duration.ofHours(1)))), "In the future");
 
         locations.recordManual(vehicle.id(), location(VehicleLocationKind.ON_TRACK, 14L, now));
         locations.recordManual(vehicle.id(), new VehicleLocationRequest(VehicleLocationKind.PARKED, null, null, 15L, new BigDecimal("12.400"),
-                null, null, null, null, null, null, now.minus(Duration.ofHours(2))));
+                null, null, null, null, null, null, null, now.minus(Duration.ofHours(2))));
 
         assertEquals(2, locations.history(vehicle.id(), null, null, PageRequest.of(0, 10)).content().size());
         VehicleResponse read = vehicles.findById(vehicle.id());
@@ -761,7 +770,7 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
 
         // El otro lo mueve alguien a mano despues de empezar: el cierre ya no lo toca.
         locations.recordManual(other.id(), new VehicleLocationRequest(VehicleLocationKind.IN_WORKSHOP, null, null, null, null, null, null,
-                null, "Workshop", null, null, start.plus(Duration.ofHours(1))));
+                null, null, "Workshop", null, null, start.plus(Duration.ofHours(1))));
         Map<String, Object> parking = new LinkedHashMap<>();
         parking.put("trackId", 31);
         parking.put("kp", "4.250");
@@ -913,6 +922,183 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         assertEquals(Instant.parse("2026-10-10T00:12:00Z"), moving.position().observedAt());
         assertEquals(VehicleLocationSource.FIELD, moving.position().source());
         assertEquals("mto-maintenance:shift:" + shiftId, moving.position().sourceReference());
+    }
+
+    // ------------------------------------------------------- puntos de acceso a la via
+
+    /**
+     * La instantanea de los puntos de acceso de mto-configuration: un upsert con la marca de agua de
+     * {@code sequenceNumber} dentro de la sentencia. Lo anterior a lo guardado no cambia nada, lo que llega sin
+     * secuencia se aplica y conserva la guardada, y un {@code DELETED} desactiva y avanza la marca, tambien de
+     * un acceso que no se conocia (para que un alta tardia no lo resucite).
+     */
+    @Test
+    void aTrackAccessPointIsKeptWithItsWatermarkAndADeletionDisablesIt() {
+        long id = randomId();
+        long track = randomId();
+
+        accessPointHandler.handle(accessPointEvent("created", id, accessPointValues(id, "Access A", track, 14L, "1200.000", "PREPARED_ACCESS",
+                true, "12.500", "40.000", true)), masterDataContext(100L));
+        assertEquals("Access A", onlyAccessPoint(track, id).name());
+
+        accessPointHandler.handle(accessPointEvent("updated", id, accessPointValues(id, "Access B", track, 14L, "1200.000", "PREPARED_ACCESS",
+                true, "12.500", "40.000", true)), masterDataContext(90L));
+        assertEquals("Access A", onlyAccessPoint(track, id).name(), "Older than what is kept");
+
+        accessPointHandler.handle(accessPointEvent("updated", id, accessPointValues(id, "Access C", track, 14L, "1300.500", "LEVEL_CROSSING",
+                false, null, null, true)), masterDataContext(110L));
+        TrackAccessPointResponse updated = onlyAccessPoint(track, id);
+        assertEquals("Access C", updated.name());
+        assertEquals("LEVEL_CROSSING", updated.kind());
+        assertFalse(updated.roadRailAccess());
+        assertNull(updated.maxGrossWeightT(), "A limit that is no longer known");
+        assertEquals(0, new BigDecimal("1300.500").compareTo(updated.kp()));
+
+        accessPointHandler.handle(accessPointEvent("updated", id, accessPointValues(id, "Access D", track, 14L, "1300.500", "LEVEL_CROSSING",
+                false, null, null, true)), masterDataContext(null));
+        assertEquals("Access D", onlyAccessPoint(track, id).name(), "Without a sequence it applies");
+        assertEquals(110L, jdbc.queryForObject("select source_sequence_number from track_access_point where id = ?", Long.class, id),
+                "and keeps the stored watermark");
+        accessPointHandler.handle(accessPointEvent("updated", id, accessPointValues(id, "Access E", track, 14L, "1300.500", "LEVEL_CROSSING",
+                false, null, null, true)), masterDataContext(105L));
+        assertEquals("Access D", onlyAccessPoint(track, id).name());
+
+        accessPointHandler.handle(accessPointEvent("deleted", id, accessPointValues(id, "Access D", track, 14L, "1300.500", "LEVEL_CROSSING",
+                false, null, null, true)), masterDataContext(120L));
+        assertFalse(onlyAccessPoint(track, id).enabled(), "A deletion disables it");
+        assertTrue(accessPoints.list(track, null, true).isEmpty());
+        assertEquals(1, accessPoints.list(track, null, false).size());
+        accessPointHandler.handle(accessPointEvent("updated", id, accessPointValues(id, "Access D", track, 14L, "1300.500", "LEVEL_CROSSING",
+                false, null, null, true)), masterDataContext(115L));
+        assertFalse(onlyAccessPoint(track, id).enabled(), "A late update does not bring it back");
+        assertEquals(120L, jdbc.queryForObject("select source_sequence_number from track_access_point where id = ?", Long.class, id));
+
+        // Un borrado de uno que no se conocia: queda dado de alta desactivado, y su alta tardia no lo resucita.
+        long unknown = randomId();
+        accessPointHandler.handle(accessPointEvent("deleted", unknown, accessPointValues(unknown, "Gone", track, 14L, null, "DEPOT", true,
+                null, null, true)), masterDataContext(500L));
+        accessPointHandler.handle(accessPointEvent("created", unknown, accessPointValues(unknown, "Gone", track, 14L, null, "DEPOT", true,
+                null, null, true)), masterDataContext(400L));
+        assertFalse(onlyAccessPoint(track, unknown).enabled());
+        // Sin sus values, un borrado solo desactiva lo que ya habia: de uno desconocido no queda nada.
+        long withoutValues = randomId();
+        accessPointHandler.handle(new IncomingEvent("track-access-point", String.valueOf(withoutValues), "deleted", Map.of()),
+                masterDataContext(600L));
+        assertEquals(0, jdbc.queryForObject("select count(*) from track_access_point where id = ?", Integer.class, withoutValues));
+        assertThrows(IllegalArgumentException.class, () -> accessPointHandler.handle(new IncomingEvent("track-access-point",
+                String.valueOf(withoutValues), "updated", Map.of("id", withoutValues)), masterDataContext(601L)), "An update without its values");
+    }
+
+    @Test
+    void theAccessPointsOfATrackAreListedByKpAndFilteredByPackageAndState() {
+        long track = randomId();
+        long executionPackage = randomId();
+        long far = randomId();
+        long near = randomId();
+        long withoutKp = randomId();
+        long disabled = randomId();
+        accessPointHandler.handle(accessPointEvent("created", far, accessPointValues(far, "Far", track, executionPackage, "2000.000",
+                "PREPARED_ACCESS", true, null, null, true)), masterDataContext(null));
+        accessPointHandler.handle(accessPointEvent("created", withoutKp, accessPointValues(withoutKp, "Somewhere", track, executionPackage, null,
+                "DEPOT", true, null, null, true)), masterDataContext(null));
+        accessPointHandler.handle(accessPointEvent("created", near, accessPointValues(near, "Near", track, executionPackage, "100.000",
+                "LEVEL_CROSSING", true, null, null, true)), masterDataContext(null));
+        accessPointHandler.handle(accessPointEvent("created", disabled, accessPointValues(disabled, "Closed", track, executionPackage, "50.000",
+                "LEVEL_CROSSING", true, null, null, false)), masterDataContext(null));
+
+        assertEquals(List.of(disabled, near, far, withoutKp), accessPoints.list(track, null, null).stream().map(TrackAccessPointResponse::id).toList(),
+                "By kp, the one without kp last");
+        assertEquals(List.of(near, far, withoutKp), accessPoints.list(track, null, true).stream().map(TrackAccessPointResponse::id).toList());
+        assertEquals(List.of(disabled, near, far, withoutKp), accessPoints.list(null, executionPackage, null).stream()
+                .map(TrackAccessPointResponse::id).toList());
+        assertTrue(accessPoints.list(track, randomId(), null).isEmpty());
+    }
+
+    /**
+     * El ejemplo que versiona mto-configuration ({@code docs/messaging/examples/master-data-track-access-point-updated.json}
+     * de alli, copiado en {@code contracts/mto-configuration/}) pasa, leido como lo lee el consumidor, por el
+     * manejador real con un id de este test: una clave renombrada alli falla aqui.
+     */
+    @Test
+    void theTrackAccessPointAsMtoConfigurationPublishesItIsKeptAsItCame() {
+        long id = randomId();
+        accessPointHandler.handle(configurationContractEvent("master-data-track-access-point-updated", id), masterDataContext(randomId()));
+
+        TrackAccessPointResponse kept = onlyAccessPoint(3L, id);
+        assertEquals("Acceso km 110+176", kept.name());
+        assertEquals(3L, kept.trackId());
+        assertEquals(14L, kept.executionPackageId());
+        assertEquals(12L, kept.stationId());
+        assertEquals(0, new BigDecimal("110176.000").compareTo(kept.kp()));
+        assertEquals("PREPARED_ACCESS", kept.kind());
+        assertEquals("LEFT", kept.side());
+        assertTrue(kept.roadRailAccess());
+        assertEquals(0, new BigDecimal("12.500").compareTo(kept.maxAxleLoadT()));
+        assertEquals(0, new BigDecimal("40.000").compareTo(kept.maxGrossWeightT()));
+        assertEquals(0, new BigDecimal("31.669342").compareTo(kept.latitude()));
+        assertEquals(0, new BigDecimal("34.574119").compareTo(kept.longitude()));
+        assertTrue(kept.enabled());
+    }
+
+    /**
+     * Con {@code accessPointId}, las reglas del acceso: que exista (404 {@code TAP-404}), que este habilitado, en
+     * la via de la ubicacion, que admita biviales, que sea un acceso preparado si el modelo lo exige y que aguante
+     * su peso. Cada rechazo es un 409 {@code VEH-001} con su motivo, y no escribe nada.
+     */
+    @Test
+    void aLocationWithAnAccessPointFollowsItsRulesAndShowsIt() {
+        VehicleResponse roadRail = roadRailVehicle(true, "32.00", "8.00");
+        long track = randomId();
+        long executionPackage = randomId();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        long prepared = accessPoint(track, executionPackage, "PREPARED_ACCESS", true, "12.500", "40.000", true);
+
+        NotFoundException unknown = assertThrows(NotFoundException.class, () -> locations.recordManual(roadRail.id(),
+                onTrackAt(track, randomId(), now)));
+        assertEquals("TAP-404", new GlobalExceptionHandler().handleNotFound(unknown, new MockHttpServletRequest()).getBody().errorCode());
+
+        long disabled = accessPoint(track, executionPackage, "PREPARED_ACCESS", true, null, null, false);
+        assertEquals("Access point AP-" + disabled + " is disabled: no vehicle on-tracks or off-tracks there",
+                assertThrows(FleetRuleException.class, () -> locations.recordManual(roadRail.id(), onTrackAt(track, disabled, now))).getMessage());
+        assertEquals("Access point AP-" + prepared + " is on track " + track + ", not on track " + (track + 1) + " of the location",
+                assertThrows(FleetRuleException.class, () -> locations.recordManual(roadRail.id(), onTrackAt(track + 1, prepared, now)))
+                        .getMessage());
+        long noRoadRail = accessPoint(track, executionPackage, "PREPARED_ACCESS", false, null, null, true);
+        assertEquals("Access point AP-" + noRoadRail + " does not admit road-rail vehicles: Vehicle " + roadRail.code()
+                        + " cannot on-track or off-track there",
+                assertThrows(FleetRuleException.class, () -> locations.recordManual(roadRail.id(), onTrackAt(track, noRoadRail, now))).getMessage());
+        long crossing = accessPoint(track, executionPackage, "LEVEL_CROSSING", true, null, null, true);
+        assertEquals("Vehicle " + roadRail.code() + " needs a prepared access, and access point AP-" + crossing + " is a LEVEL_CROSSING",
+                assertThrows(FleetRuleException.class, () -> locations.recordManual(roadRail.id(), onTrackAt(track, crossing, now))).getMessage());
+        long light = accessPoint(track, executionPackage, "PREPARED_ACCESS", true, null, "30.000", true);
+        assertEquals("Vehicle " + roadRail.code() + " weighs up to 32 t, more than the 30 t that access point AP-" + light + " takes",
+                assertThrows(FleetRuleException.class, () -> locations.recordManual(roadRail.id(), onTrackAt(track, light, now))).getMessage());
+        long narrow = accessPoint(track, executionPackage, "PREPARED_ACCESS", true, "7.500", null, true);
+        assertEquals("Vehicle " + roadRail.code() + " has an axle load of up to 8 t, more than the 7.5 t that access point AP-" + narrow + " takes",
+                assertThrows(FleetRuleException.class, () -> locations.recordManual(roadRail.id(), onTrackAt(track, narrow, now))).getMessage());
+        assertTrue(locations.history(roadRail.id(), null, null, PageRequest.of(0, 10)).content().isEmpty(), "A refusal writes nothing");
+
+        // Un modelo que no exige acceso preparado encarrila en un paso a nivel; y sin pesos conocidos, no se comparan.
+        VehicleResponse plain = roadRailVehicle(false, null, null);
+        assertNotNull(locations.recordManual(plain.id(), onTrackAt(track, crossing, now)));
+
+        VehicleLocationResponse onTrack = locations.recordManual(roadRail.id(), new VehicleLocationRequest(VehicleLocationKind.ON_TRACK, null, null,
+                track, new BigDecimal("1200.000"), null, null, "Next to the gate", prepared, null, null, null, now.minusSeconds(60)));
+        assertEquals(new TrackAccessPointSummary(prepared, "AP-" + prepared, "PREPARED_ACCESS"), onTrack.trackAccessPoint());
+        assertEquals("Next to the gate", onTrack.accessPoint(), "The free text keeps its key, as it was");
+        assertEquals(executionPackage, onTrack.executionPackageId(), "The package of the access point, for the board");
+        assertEquals(new TrackAccessPointSummary(prepared, "AP-" + prepared, "PREPARED_ACCESS"),
+                vehicles.findById(roadRail.id()).position().trackAccessPoint());
+        assertEquals(prepared, locations.history(roadRail.id(), null, null, PageRequest.of(0, 10)).content().getFirst().trackAccessPoint().id());
+        FleetPositionResponse row = locations.positions(null, track, null, PageRequest.of(0, 10)).content().stream()
+                .filter(position -> position.vehicle().id().equals(roadRail.id())).findFirst().orElseThrow();
+        assertEquals(prepared, row.position().trackAccessPoint().id());
+
+        // Desencarrila en el mismo acceso y se va por carretera: sin via en la ubicacion, la via no se compara.
+        VehicleLocationResponse offTrack = locations.recordManual(roadRail.id(), new VehicleLocationRequest(VehicleLocationKind.ON_ROAD, null, null,
+                null, null, null, null, null, prepared, null, null, null, now));
+        assertEquals(prepared, offTrack.trackAccessPoint().id());
+        assertNull(offTrack.accessPoint());
     }
 
     @Test
@@ -1536,12 +1722,92 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
                 status, reason, null, null, null, null, null);
     }
 
+    /** Una bivial de un modelo que exige acceso preparado o no, con sus pesos (o sin ellos). */
+    private VehicleResponse roadRailVehicle(boolean needsPreparedAccess, String maxGrossT, String maxAxleLoadT) {
+        VehicleTypeResponse type = types.create(new VehicleTypeRequest("VT" + random(), "Road-rail truck", null, null, VehicleMobility.ROAD_RAIL,
+                VehicleCategory.ROAD_RAIL_TRUCK, true, false, null, null, null, null, maxGrossT == null ? null : new BigDecimal(maxGrossT),
+                maxAxleLoadT == null ? null : new BigDecimal(maxAxleLoadT), null, 3, null, null, null, null, null, null, null, null, false,
+                RailGearType.RAIL_WHEEL_DRIVE, null, needsPreparedAccess, null, null, Set.of(), null, null, null, null, null, null, null, null));
+        return vehicles.create(vehicleRequest(type.id(), "RR-" + random(), null));
+    }
+
+    private static VehicleLocationRequest onTrackAt(long trackId, long accessPointId, Instant observedAt) {
+        return new VehicleLocationRequest(VehicleLocationKind.ON_TRACK, null, null, trackId, null, null, null, null, accessPointId, null, null,
+                null, observedAt);
+    }
+
+    /** Un punto de acceso dado de alta por el manejador real, llamado {@code AP-<id>}. */
+    private long accessPoint(long trackId, long executionPackageId, String kind, boolean roadRailAccess, String maxAxleLoadT,
+                             String maxGrossWeightT, boolean enabled) {
+        long id = randomId();
+        accessPointHandler.handle(accessPointEvent("created", id, accessPointValues(id, "AP-" + id, trackId, executionPackageId, "1200.000", kind,
+                roadRailAccess, maxAxleLoadT, maxGrossWeightT, enabled)), masterDataContext(null));
+        return id;
+    }
+
+    /** Los {@code values} de un punto de acceso como los publica mto-configuration. */
+    private static Map<String, Object> accessPointValues(long id, String name, long trackId, Long executionPackageId, String kp, String kind,
+                                                         boolean roadRailAccess, String maxAxleLoadT, String maxGrossWeightT, boolean enabled) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("id", id);
+        values.put("name", name);
+        values.put("enabled", enabled);
+        values.put("kp", kp == null ? null : new BigDecimal(kp));
+        values.put("kind", kind);
+        values.put("side", "LEFT");
+        values.put("roadRailAccess", roadRailAccess);
+        values.put("maxAxleLoadT", maxAxleLoadT == null ? null : new BigDecimal(maxAxleLoadT));
+        values.put("maxGrossWeightT", maxGrossWeightT == null ? null : new BigDecimal(maxGrossWeightT));
+        values.put("latitude", null);
+        values.put("longitude", null);
+        values.put("station", null);
+        Map<String, Object> track = new LinkedHashMap<>();
+        track.put("id", trackId);
+        track.put("name", "TRACK " + trackId);
+        track.put("executionPackageId", executionPackageId);
+        values.put("track", track);
+        return values;
+    }
+
+    private static IncomingEvent accessPointEvent(String operation, long id, Map<String, Object> values) {
+        return new IncomingEvent("track-access-point", String.valueOf(id), operation, values);
+    }
+
+    private static IncomingEventContext masterDataContext(Long sequenceNumber) {
+        return new IncomingEventContext("mto-configuration", sequenceNumber, UUID.randomUUID().toString());
+    }
+
+    private TrackAccessPointResponse onlyAccessPoint(long trackId, long id) {
+        List<TrackAccessPointResponse> matching = accessPoints.list(trackId, null, null).stream().filter(point -> point.id() == id).toList();
+        assertEquals(1, matching.size(), "Access point " + id + " on track " + trackId);
+        return matching.getFirst();
+    }
+
+    /** El ejemplo de mto-configuration con su id cambiado por el de este test, leido como lo lee el consumidor. */
+    private static IncomingEvent configurationContractEvent(String name, long id) {
+        try (java.io.InputStream json = BusinessLayerTest.class.getResourceAsStream("/contracts/mto-configuration/" + name + ".json")) {
+            String text = new String(java.util.Objects.requireNonNull(json, name).readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+                    .replace("\"id\": 77,", "\"id\": " + id + ",")
+                    .replace("\"entityId\": \"77\"", "\"entityId\": \"" + id + "\"");
+            MasterDataChangedMessage message = tools.jackson.databind.json.JsonMapper.builder().build()
+                    .readValue(text, MasterDataChangedMessage.class);
+            return message.toIncomingEvent().data();
+        } catch (java.io.IOException failure) {
+            throw new java.io.UncheckedIOException(failure);
+        }
+    }
+
+    /** Un id de mto-configuration que no choca con los de otras pasadas: la base se comparte. */
+    private static long randomId() {
+        return ThreadLocalRandom.current().nextLong(1_000_000_000L, 9_000_000_000_000L);
+    }
+
     private static VehicleLocationRequest location(VehicleLocationKind kind, Long trackId, Instant observedAt) {
-        return new VehicleLocationRequest(kind, null, null, trackId, null, null, null, null, null, null, null, observedAt);
+        return new VehicleLocationRequest(kind, null, null, trackId, null, null, null, null, null, null, null, null, observedAt);
     }
 
     private static VehicleLocationRequest attached(UUID carrier, VehicleAttachment attachment, Instant observedAt) {
-        return new VehicleLocationRequest(VehicleLocationKind.ATTACHED, null, null, null, null, null, null, null, null, carrier, attachment,
+        return new VehicleLocationRequest(VehicleLocationKind.ATTACHED, null, null, null, null, null, null, null, null, null, carrier, attachment,
                 observedAt);
     }
 

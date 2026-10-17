@@ -196,7 +196,7 @@ class MaintenanceShiftEventHandler implements IncomingEventHandler {
 
     private static VehicleLocationRequest location(VehicleLocationKind kind, UUID siteId, Long executionPackageId, Long trackId,
                                                    BigDecimal kp, String description, Instant observedAt) {
-        return new VehicleLocationRequest(kind, siteId, executionPackageId, trackId, kp, null, null, null, description, null, null,
+        return new VehicleLocationRequest(kind, siteId, executionPackageId, trackId, kp, null, null, null, null, description, null, null,
                 observedAt);
     }
 

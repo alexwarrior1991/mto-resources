@@ -43,6 +43,6 @@ like the material is shared through `mto-stock`.
 |---|---|
 | `mto-maintenance` | Consumes `mto.resources.{person,team,vehicle,instrument}.*` (its teams, crews, vehicles and instruments, with their qualifications, documents and calibration: what is expired does not enter a shift); publishes `mto.maintenance.shift.*`, which moves the vehicles here. |
 | `mto-notification` | Records every event of `mto.resources.#`, and warns of the expiries (`qualification.*`, `vehicle-document.*`, `calibration.*`). |
-| `mto-configuration` | EP, track and station ids are stored as plain `bigint`s, without a foreign key. |
+| `mto-configuration` | EP, track and station ids are stored as plain `bigint`s, without a foreign key. Its track access points (`mto.master-data.track-access-point.*`) are kept as a snapshot, for the rules of on-tracking a road-rail vehicle. |
 | `mto-gateway` | `/api/resources/** → /api/v1/resources/**`. |
 | `mto-platform` | Brings up PostgreSQL (`mto_resources`), RabbitMQ and Keycloak; applies `keycloak/`. |

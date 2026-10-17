@@ -160,6 +160,35 @@ what is observed earlier stays in the history and does not move the position.
 Sources: `MANUAL`, `SHIFT` (derived from `mto-maintenance`), `FIELD` and `TELEMATICS` (later). A
 retired vehicle does not move; `observedAt` is never in the future (one minute of clock skew).
 
+### Track access points
+
+A road-rail vehicle leaves the road and on-tracks at a **track access point**, and off-tracks at one. They
+are master data of `mto-configuration` (its `V28`): a name, the track (always) and maybe a station, a kp
+(in metres, as `mto-configuration` keeps it), a kind (`PREPARED_ACCESS`, `LEVEL_CROSSING`, `DEPOT`), a
+side (`LEFT`, `RIGHT`, `BOTH`), whether it admits road-rail vehicles (`roadRailAccess`), the maximum axle
+load and gross weight it takes (tonnes, optional), its coordinates and `enabled`. This service keeps a
+snapshot of them (`track_access_point`, `V9`), fed by the master-data channel and never edited here
+(`docs/06-messaging.md`); a deletion there disables it here.
+
+A location may say where it on-tracked or off-tracked with `accessPointId` (one of the catalogue), besides
+or instead of the free text `accessPoint`. It is never required, and only when it is given
+`FleetRules.accessPointViolation` checks it, each refusal a 409 `VEH-001` with its reason (an unknown id is
+404 `TAP-404`):
+
+| Rule | Reason |
+|---|---|
+| The access point is enabled | `Access point <name> is disabled: no vehicle on-tracks or off-tracks there` |
+| It is on the track of the location, when the location says one (an `ON_ROAD` after off-tracking says none) | `Access point <name> is on track <id>, not on track <id> of the location` |
+| It admits road-rail vehicles, if the vehicle is one (it says nothing of a rail-only or road-only one) | `Access point <name> does not admit road-rail vehicles: Vehicle <code> cannot on-track or off-track there` |
+| It is a `PREPARED_ACCESS`, if the model needs one (`needsPreparedAccess`) | `Vehicle <code> needs a prepared access, and access point <name> is a <kind>` |
+| It takes the maximum gross weight of the model (`maxGrossT` against `maxGrossWeightT`), when both are known | `Vehicle <code> weighs up to <t> t, more than the <t> t that access point <name> takes` |
+| It takes the maximum axle load of the model (`maxAxleLoadT` against `maxAxleLoadT`), when both are known | `Vehicle <code> has an axle load of up to <t> t, more than the <t> t that access point <name> takes` |
+
+A location that does not say its EP takes the one of the access point, so that the board finds it; its
+track and kp are always the ones the location says.
+The answer of a location says it as `trackAccessPoint` (`{id, name, kind}`, or null), a key of its own:
+`accessPoint` is still the free text.
+
 ### Derived from the shifts
 
 - `shift.started`: rail-only and road-rail vehicles go `ON_TRACK` on the first track of the shift at its

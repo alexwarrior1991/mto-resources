@@ -7,6 +7,7 @@ import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCateg
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleLocationKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleMobility;
 
+import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.Set;
 
@@ -17,7 +18,8 @@ import java.util.Set;
  *   <li>De solo via: nunca por carretera, y aparcado siempre sobre una via (la suya con kp, o un sitio con
  *       via).</li>
  *   <li>De solo carretera: nunca en la via, y aparcado fuera de ella.</li>
- *   <li>Bivial: en las dos.</li>
+ *   <li>Bivial: en las dos, entrando y saliendo de la via por un punto de acceso, que tiene sus propias
+ *       reglas ({@link #accessPointViolation}).</li>
  * </ul>
  */
 public final class FleetRules {
@@ -135,6 +137,75 @@ public final class FleetRules {
                     : Optional.of(vehicle + " is not portable: only a road vehicle (a low loader, a truck) carries it, and "
                     + carrier + " is " + carrierMobility);
         };
+    }
+
+    // ------------------------------------------------------------- el punto de acceso a la via
+
+    /** La clase de acceso que exige un modelo con {@code needsPreparedAccess}. */
+    public static final String PREPARED_ACCESS = "PREPARED_ACCESS";
+
+    /**
+     * Lo que un punto de acceso a la via de {@code mto-configuration} dice de si mismo, reducido a lo que
+     * deciden las reglas.
+     *
+     * @param kind            {@code PREPARED_ACCESS}, {@code LEVEL_CROSSING} o {@code DEPOT} (texto: es de otro servicio)
+     * @param maxAxleLoadT    carga por eje maxima, en toneladas; {@code null}, sin limite conocido
+     * @param maxGrossWeightT peso bruto maximo, en toneladas; {@code null}, sin limite conocido
+     */
+    public record AccessPointShape(String name, boolean enabled, Long trackId, String kind, boolean roadRailAccess,
+                                   BigDecimal maxAxleLoadT, BigDecimal maxGrossWeightT) {
+    }
+
+    /**
+     * Si un vehiculo puede encarrilar o desencarrilar en ese punto de acceso. Solo se mira cuando la ubicacion
+     * lo dice; nunca es obligatorio. El primer motivo que lo impide, en este orden:
+     *
+     * <ul>
+     *   <li>el acceso no esta habilitado;</li>
+     *   <li>no esta en la via de la ubicacion, si la ubicacion dice su via ({@code locationTrackId});</li>
+     *   <li>no admite biviales ({@code roadRailAccess=false}) y el vehiculo lo es: a uno de solo via o de solo
+     *       carretera no le dice nada;</li>
+     *   <li>el modelo exige un acceso preparado ({@code needsPreparedAccess}) y no lo es;</li>
+     *   <li>el peso bruto maximo del modelo ({@code maxGrossT}) pasa del que aguanta el acceso
+     *       ({@code maxGrossWeightT}), o su carga por eje ({@code maxAxleLoadT}) de la del acceso; solo si se
+     *       conocen las dos cifras.</li>
+     * </ul>
+     */
+    public static Optional<String> accessPointViolation(String vehicle, VehicleMobility mobility, boolean needsPreparedAccess,
+                                                        BigDecimal maxGrossT, BigDecimal maxAxleLoadT, AccessPointShape accessPoint,
+                                                        Long locationTrackId) {
+        // Al principio de la frase con mayuscula, en medio sin ella.
+        String subject = "Access point " + accessPoint.name();
+        String access = "access point " + accessPoint.name();
+        if (!accessPoint.enabled()) {
+            return Optional.of(subject + " is disabled: no vehicle on-tracks or off-tracks there");
+        }
+        if (locationTrackId != null && !locationTrackId.equals(accessPoint.trackId())) {
+            return Optional.of(subject + " is on track " + accessPoint.trackId() + ", not on track " + locationTrackId + " of the location");
+        }
+        if (mobility == VehicleMobility.ROAD_RAIL && !accessPoint.roadRailAccess()) {
+            return Optional.of(subject + " does not admit road-rail vehicles: " + vehicle + " cannot on-track or off-track there");
+        }
+        if (needsPreparedAccess && !PREPARED_ACCESS.equals(accessPoint.kind())) {
+            return Optional.of(vehicle + " needs a prepared access, and " + access + " is a " + accessPoint.kind());
+        }
+        if (exceeds(maxGrossT, accessPoint.maxGrossWeightT())) {
+            return Optional.of(vehicle + " weighs up to " + tonnes(maxGrossT) + " t, more than the " + tonnes(accessPoint.maxGrossWeightT())
+                    + " t that " + access + " takes");
+        }
+        if (exceeds(maxAxleLoadT, accessPoint.maxAxleLoadT())) {
+            return Optional.of(vehicle + " has an axle load of up to " + tonnes(maxAxleLoadT) + " t, more than the "
+                    + tonnes(accessPoint.maxAxleLoadT()) + " t that " + access + " takes");
+        }
+        return Optional.empty();
+    }
+
+    private static boolean exceeds(BigDecimal value, BigDecimal limit) {
+        return value != null && limit != null && value.compareTo(limit) > 0;
+    }
+
+    private static String tonnes(BigDecimal value) {
+        return value.stripTrailingZeros().toPlainString();
     }
 
     // ------------------------------------------------------------- el conductor de un modelo

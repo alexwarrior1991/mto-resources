@@ -28,6 +28,7 @@ final class BusinessErrorCodeResolver {
             Map.entry("Person qualification", "QUA"),
             Map.entry("Vehicle document", "VDO"),
             Map.entry("Instrument", "INT"),
+            Map.entry("Track access point", "TAP"),
             Map.entry("Background operation", "OPS")
     );
 

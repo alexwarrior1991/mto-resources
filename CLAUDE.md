@@ -20,7 +20,8 @@ the source of truth; `03-database.md` documents the schema and should be checked
 persistence code.
 
 ⚠️ `mto-maintenance`, `mto-configuration` and the rest are **independent sibling repositories**. EP,
-track and station ids of `mto-configuration` are plain `bigint`s here, without a foreign key. This
+track and station ids of `mto-configuration` are plain `bigint`s here, without a foreign key; of its
+masters only the track access points are kept, as a snapshot fed by its master-data channel. This
 service **calls nobody**: what it needs from `mto-maintenance` (where the vehicles of a shift went)
 arrives by RabbitMQ, and what `mto-maintenance` needs from here (teams, crews, vehicles) leaves by
 RabbitMQ. No service account.
@@ -50,7 +51,8 @@ schema change is a new migration, and one that changes an audited table changes 
 Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintenance`:
 
 - `domain/model` — framework-free rules: `CrewComposition` (`MIN_LINEMEN = 2`, `MAX_LINEMEN = 6`;
-  `mto-maintenance` keeps a copy for the crew of a shift), `OrganizationRules`, `FleetRules`, `ExpiryRules`
+  `mto-maintenance` keeps a copy for the crew of a shift), `OrganizationRules`, `FleetRules` (also the rules
+  of a track access point, `accessPointViolation`), `ExpiryRules`
   (expired from the day after the expiry date, the warning window, the default expiry of a type). They
   return the reason instead of throwing: the caller decides 400 or 409.
 - `application` — `dto` (one package per resource), `service` + `service/impl` (package-private impls;
@@ -60,7 +62,8 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
   built by hand because they carry what is computed), `exception`.
 - `infrastructure` — `persistence` (entities, repositories, specifications, Envers), `web` (controllers,
   merge-patch, `PreferHeader`/`OperationResponses`, the exception handler, `actuator/RepublishEndpoint`),
-  `messaging/rabbitmq` (`MaintenanceEventConsumer`), `messaging/outbox` (copy of `mto-configuration`'s).
+  `messaging/rabbitmq` (`MaintenanceEventConsumer`, `FieldEventConsumer`, `MasterDataEventConsumer`),
+  `messaging/outbox` (copy of `mto-configuration`'s).
 - `configuration` — security, `rabbitmq`, `messaging` (signature), `outbox`, `async` (virtual threads,
   `OperationsProperties`, the scheduler of the background operations), `expiry` (`ExpiryWatchProperties`,
   `app.resources.expiry.*`: `enabled`, `cron` in UTC, `warning-days` 30; the daily scheduler of
@@ -83,6 +86,12 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
 - **`vehicle_position` moves only through `VehiclePositionRepository.moveTo`**, the native upsert with
   the `observed_at` watermark inside the statement; never read-then-write. `vehicle_location_event` is
   append-only.
+- **`track_access_point` is a snapshot of `mto-configuration`, written only by `TrackAccessPointRepository`**
+  (`V9`): a native upsert keyed by the id of `mto-configuration` with the `sequenceNumber` watermark inside its
+  `WHERE` (a message without one applies and keeps the stored one), never read-then-write and never through
+  the API (`GET /track-access-points` reads it; a write is denied). A `DELETED` disables it and advances the
+  watermark, also for one never seen. Not audited, `@Immutable` for Hibernate; `kind`/`side` are `varchar`, not
+  enums, because they are another service's values.
 - **An expiry is warned about once per expiry date**: `ExpiryWatchService` writes the mark
   (`expiring_notified_for` / `expired_notified_for` of `person_qualification`, `vehicle_document` and
   `instrument`) with native SQL and the condition inside the statement (`is distinct from :expiresOn`), and
@@ -93,7 +102,12 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
 - **Where a vehicle can be is decided by its mobility** (`FleetRules`): a rail-only vehicle is never on
   the road and is parked on a track; a road-only one is never on the track; an attached one is towed by
   one with `TOWING` on the same way or carried by a road vehicle (or anything, if portable), and is read
-  where its carrier is.
+  where its carrier is. A location that says its `accessPointId` (never required) is checked by
+  `FleetRules.accessPointViolation`, 409 `VEH-001`: the access point is enabled, on the location's track (if it
+  says one), admits road-rail vehicles (if the vehicle is one), is a `PREPARED_ACCESS` if the model
+  `needsPreparedAccess`, and takes the model's `maxGrossT`/`maxAxleLoadT` (when both figures are known); an
+  unknown one is 404 `TAP-404`. The answer keeps `accessPoint` as the free text and adds `trackAccessPoint
+  {id, name, kind}` (a new key: a published key never changes type).
 - **A model is coherent with its mobility** (`FleetRules.typeViolation`); a vehicle carries what its
   model needs (plate if it runs on the road, rail number if it may run on open track). A model that does
   not say the qualification of its driver takes the one of its mobility (`FleetRules.defaultDriverQualification`).
@@ -130,10 +144,18 @@ people of changes, not of republications nor of every note. Consumes
 `mto.maintenance.shift.*` on its own queue `mto.resources.maintenance.queue` (DLX/DLQ) through the
 idempotent inbox, and the positions of the field devices (`mto.field.position.*` on
 `mto.field.telemetry.exchange`, queue `mto.resources.field.queue`, `FieldPositionHandler`): `ON_TRACK` with
-`source = FIELD` and the reference of the shift, ignored once that shift left the track. **Keys are only added**; a new key or event changes its example in
+`source = FIELD` and the reference of the shift, ignored once that shift left the track; and the track access
+points of `mto-configuration` (`mto.master-data.track-access-point.*` only, on `mto.master-data.exchange`, queue
+`mto.resources.master-data.queue`, `app.rabbitmq.master-data.*`, `MasterDataEventConsumer` →
+`TrackAccessPointMasterDataHandler`): the master-data envelope says `data.operation`, which becomes the
+`eventName` (`created`/`updated`/`deleted`) of the common inbox and dispatcher (`source_service = mto-configuration`).
+That queue need not exist before `mto-configuration` publishes (other queues are bound to `mto.master-data.#`),
+but what was published before it is loaded by republishing the access points there. **Keys are only added**; a new key or event changes its example in
 `docs/messaging/examples/` in the same commit. The other way round, the shift examples of
-`mto-maintenance` are copied in `src/test/resources/contracts/mto-maintenance/` and `BusinessLayerTest`
-runs them through the real handler: a change of those examples is copied here in the same change.
+`mto-maintenance` (`contracts/mto-maintenance/`), the position of `mto-field` (`contracts/mto-field/`) and the
+access point of `mto-configuration` (`contracts/mto-configuration/`) are copied in `src/test/resources/contracts/`
+and `BusinessLayerTest` runs them through the real handler: a change of those examples is copied here in the
+same change.
 
 ### Testing
 
