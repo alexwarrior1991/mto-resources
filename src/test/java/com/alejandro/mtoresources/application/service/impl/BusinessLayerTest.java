@@ -11,6 +11,9 @@ import com.alejandro.mtoresources.application.dto.fleet.VehicleResponse;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleTypeRequest;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleTypeResponse;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleTypeUpdateRequest;
+import com.alejandro.mtoresources.application.dto.instrument.InstrumentRequest;
+import com.alejandro.mtoresources.application.dto.instrument.InstrumentResponse;
+import com.alejandro.mtoresources.application.dto.instrument.InstrumentUpdateRequest;
 import com.alejandro.mtoresources.application.dto.messaging.DomainEvent;
 import com.alejandro.mtoresources.application.dto.messaging.IncomingEvent;
 import com.alejandro.mtoresources.application.dto.messaging.IncomingEventContext;
@@ -45,6 +48,7 @@ import com.alejandro.mtoresources.application.exception.TooManyOperationsExcepti
 import com.alejandro.mtoresources.application.exception.ValidationException;
 import com.alejandro.mtoresources.application.service.BudgetedOperations;
 import com.alejandro.mtoresources.application.service.DomainEventPublisher;
+import com.alejandro.mtoresources.application.service.InstrumentService;
 import com.alejandro.mtoresources.application.service.OrganizationUnitService;
 import com.alejandro.mtoresources.application.service.PersonQualificationService;
 import com.alejandro.mtoresources.application.service.PersonService;
@@ -56,6 +60,7 @@ import com.alejandro.mtoresources.application.service.VehicleService;
 import com.alejandro.mtoresources.application.service.VehicleTypeService;
 import com.alejandro.mtoresources.configuration.AuditActorResolver;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.DrivingLicence;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.InstrumentKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnitKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonCategory;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonEmployer;
@@ -166,6 +171,8 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
     private PersonQualificationService personQualifications;
     @Autowired
     private VehicleDocumentService vehicleDocuments;
+    @Autowired
+    private InstrumentService instruments;
     @Autowired
     private VehicleService vehicles;
     @Autowired
@@ -604,6 +611,81 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         assertEquals(List.of(0, 2), jdbc.queryForList("select revtype from vehicle_document_aud where id = ? order by rev", Integer.class,
                 inspection.id()), "Created and deleted, with what it was");
         assertEquals(2, jdbc.queryForObject("select count(*) from vehicle_document_aud where id = ?", Integer.class, insurance.id()));
+    }
+
+    // --------------------------------------------------------------------------- instrumentos
+
+    @Test
+    void anInstrumentIsRetiredNeverDeletedAndKeepsItsHistory() {
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        String tag = random();
+        String code = "pt-" + random();
+        events.clear();
+
+        InstrumentResponse pole = instruments.create(new InstrumentRequest(code, " Pole " + tag + " ", InstrumentKind.EARTHING_POLE,
+                " EP-1 ", today.minusYears(1), today.plusDays(200), null));
+        assertEquals(code.toUpperCase(Locale.ROOT), pole.code());
+        assertEquals("Pole " + tag, pole.name());
+        assertEquals("EP-1", pole.serialNumber());
+        assertFalse(pole.calibrationExpired());
+        DomainEvent created = events.only("instrument.created");
+        assertEquals(List.of("code", "name", "kind", "serialNumber", "calibratedOn", "calibrationExpiresOn", "active", "version",
+                "republished"), List.copyOf(created.values().keySet()));
+        assertEquals(today.plusDays(200).toString(), created.values().get("calibrationExpiresOn"));
+        assertEquals("EARTHING_POLE", created.values().get("kind"));
+
+        DuplicateCodeException duplicate = assertThrows(DuplicateCodeException.class, () -> instruments.create(new InstrumentRequest(code,
+                "Again", InstrumentKind.OTHER, null, null, null, null)));
+        assertEquals("INT-409", new GlobalExceptionHandler().handleDuplicateCode(duplicate, new MockHttpServletRequest()).getBody().errorCode());
+        assertThrows(ValidationException.class, () -> instruments.create(new InstrumentRequest("I" + random(), "Late", InstrumentKind.OTHER,
+                null, today, today.minusDays(1), null)), "Its calibration expires before it was made");
+
+        InstrumentResponse detector = instruments.create(new InstrumentRequest("DT-" + random(), "Detector " + tag,
+                InstrumentKind.VOLTAGE_DETECTOR, null, today.minusYears(1), today.minusDays(1), null));
+        assertTrue(detector.calibrationExpired());
+        InstrumentResponse uncalibrated = instruments.create(new InstrumentRequest("M-" + random(), "Gauge " + tag, InstrumentKind.MEASURING,
+                null, null, null, null));
+        assertFalse(uncalibrated.calibrationExpired(), "Without a calibration nothing expires");
+        assertEquals(Set.of(detector.id()), instrumentIds(instruments.search(tag, null, null, today, PageRequest.of(0, 10)).content()),
+                "Expiring before today: never one without a calibration");
+        assertEquals(Set.of(pole.id(), detector.id()), instrumentIds(instruments.search(tag, null, null, today.plusDays(201),
+                PageRequest.of(0, 10)).content()));
+        assertEquals(Set.of(pole.id()), instrumentIds(instruments.search(tag, InstrumentKind.EARTHING_POLE, true, null,
+                PageRequest.of(0, 10)).content()));
+
+        // Recalibrarlo es cambiar sus fechas.
+        events.clear();
+        InstrumentResponse recalibrated = instruments.patch(detector.id(), MergePatch.of(new InstrumentUpdateRequest(null, null, null, today,
+                today.plusYears(1), null, null, detector.version())));
+        assertFalse(recalibrated.calibrationExpired());
+        assertEquals(today.plusYears(1).toString(), events.only("instrument.updated").values().get("calibrationExpiresOn"));
+        assertThrows(StaleVersionException.class, () -> instruments.patch(detector.id(), MergePatch.of(new InstrumentUpdateRequest("Late",
+                null, null, null, null, null, null, detector.version()))));
+        assertNull(instruments.patch(detector.id(), new MergePatch<>(new InstrumentUpdateRequest(null, null, null, null, null, null, null,
+                null), Set.of("calibratedOn", "calibrationExpiresOn"))).calibrationExpiresOn());
+        assertThrows(ValidationException.class, () -> instruments.patch(detector.id(), new MergePatch<>(new InstrumentUpdateRequest(null,
+                null, null, null, null, null, null, null), Set.of("kind"))));
+
+        // Se retira una vez; lo que se cambia de uno retirado es un updated, y retirarlo otra vez no dice nada.
+        events.clear();
+        instruments.patch(pole.id(), MergePatch.of(new InstrumentUpdateRequest(null, null, null, null, null, null, false, null)));
+        assertEquals(false, events.only("instrument.deactivated").values().get("active"));
+        events.clear();
+        instruments.patch(pole.id(), MergePatch.of(new InstrumentUpdateRequest(null, null, null, null, null, "In the workshop", null, null)));
+        events.only("instrument.updated");
+        events.clear();
+        instruments.deactivate(pole.id());
+        assertEquals(List.of(), events.names());
+        assertTrue(instruments.patch(pole.id(), MergePatch.of(new InstrumentUpdateRequest(null, null, null, null, null, null, true, null)))
+                .active());
+        assertEquals(true, events.only("instrument.updated").values().get("active"));
+
+        var revisions = instruments.findRevisions(pole.id(), PageRequest.of(0, 10)).content();
+        assertEquals(4, revisions.size(), "Created, retired, its notes and back");
+        assertTrue(revisions.getFirst().entity().active(), "The most recent first");
+        assertEquals("recursos.gestor", revisions.getLast().revision().author());
+        assertEquals("INT-404", new GlobalExceptionHandler().handleNotFound(assertThrows(NotFoundException.class,
+                () -> instruments.findRevisions(UUID.randomUUID(), PageRequest.of(0, 10))), new MockHttpServletRequest()).getBody().errorCode());
     }
 
     // ------------------------------------------------------------------------ ubicacion
@@ -1051,7 +1133,8 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
 
         RepublishResult result = republish.republish(executionPackage);
 
-        assertEquals(new RepublishResult(executionPackage, 5, 1, 1), result, "Leader, three linemen and the supervisor");
+        assertEquals(new RepublishResult(executionPackage, 5, 1, 1, 0), result, "Leader, three linemen and the supervisor; no instrument is "
+                + "of an execution package");
         assertEquals(5, events.names().stream().filter("person.updated"::equals).count());
         assertEquals(1, events.names().stream().filter("team.updated"::equals).count());
         assertEquals(1, events.names().stream().filter("vehicle.updated"::equals).count());
@@ -1060,6 +1143,22 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
                 "Everything it tells again says so, so that nobody is notified of it");
         assertTrue(events.published.stream().filter(event -> event.entityName().equals("vehicle"))
                 .allMatch(event -> Boolean.FALSE.equals(event.values().get("availabilityChanged"))));
+    }
+
+    @Test
+    void republishingEverythingAlsoPublishesTheInstruments() {
+        InstrumentResponse instrument = instruments.create(new InstrumentRequest("I" + random(), "Detector", InstrumentKind.VOLTAGE_DETECTOR,
+                null, null, null, null));
+        events.clear();
+
+        RepublishResult result = republish.republish(null);
+
+        assertTrue(result.instruments() >= 1);
+        DomainEvent event = events.published.stream()
+                .filter(published -> published.entityName().equals("instrument") && published.entityId().equals(instrument.id().toString()))
+                .findFirst().orElseThrow();
+        assertEquals("updated", event.eventName());
+        assertEquals(true, event.values().get("republished"));
     }
 
     // ---------------------------------------------------------------- operaciones de fondo
@@ -1154,6 +1253,10 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
     }
 
     // ------------------------------------------------------------------------ fixtures
+
+    private static Set<UUID> instrumentIds(List<InstrumentResponse> instruments) {
+        return instruments.stream().map(InstrumentResponse::id).collect(Collectors.toSet());
+    }
 
     private static Set<UUID> ids(List<PersonResponse> people) {
         return people.stream().map(PersonResponse::id).collect(Collectors.toSet());

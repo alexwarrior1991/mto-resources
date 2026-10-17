@@ -33,7 +33,8 @@ and locations), `recursos.responsable` (and deactivating), and one per position 
 team leader are in the `EQ-NORTE` group of `mto-field`, so they can join that team's shifts there. See
 [`keycloak/README.md`](keycloak/README.md).
 
-To load a new consumer (or after `mto-maintenance` declared its queue the first time):
+To load a new consumer (or after `mto-maintenance` declared its queue the first time, or after a migration
+that adds keys to the events, like `V8`), republish people, teams, vehicles and instruments:
 
 ```bash
 curl -X POST -H "Authorization: Bearer $OPS_TOKEN" http://localhost:8089/actuator/republish

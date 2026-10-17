@@ -10,7 +10,7 @@ stable `errorCode` and the request's `correlationId` — the same shapes as `mto
 |---|---|
 | `GET`/`HEAD` of everything | `resources-read` |
 | `POST /vehicles/{id}/locations` | `resources-location-write` (its matcher goes first) |
-| Writes of `/vehicles/**` (their documents too), `/vehicle-types/**` | `resources-fleet-write` |
+| Writes of `/vehicles/**` (their documents too), `/vehicle-types/**`, `/instruments/**` | `resources-fleet-write` |
 | Writes of `/people/**` (their qualifications too), `/units/**`, `/parking-sites/**`, `/qualification-types/**` | `resources-write` |
 | `DELETE` of anything, and `PUT`/`PATCH` with `active=false` (`@PreAuthorize`) | `resources-delete` |
 | `/actuator/**` | `ops-metrics` to read, `ops-write` for `POST`/`DELETE` |
@@ -33,9 +33,10 @@ No role implies another (`ApiAuthorizationRulesTest`).
 | `GET/POST /vehicles`, `GET/PUT/PATCH/DELETE /vehicles/{id}`, `GET /vehicles/{id}/revisions` | The fleet; the answer carries the current `position`. Search by `search`, `typeId`, `mobility`, `category`, `status`, `available`, `active` |
 | `GET/POST /vehicles/{vehicleId}/documents`, `PATCH/DELETE /vehicles/{vehicleId}/documents/{documentId}` | The documents of a vehicle, the whole list by kind (`expired`: its expiry is before today). One per kind (409 `VDO-409`), always with `expiresOn` (never emptied); `PATCH` (merge-patch only) renews it; `DELETE` is a physical delete. Every change publishes `vehicle.updated` with `availabilityChanged=false` |
 | `GET/POST /vehicles/{id}/locations` | The location history (`from`, `to`) and recording one by hand |
+| `GET/POST /instruments`, `GET/PUT/PATCH/DELETE /instruments/{id}`, `GET /instruments/{id}/revisions` | The calibrated instruments. Search by `search` (code, name, serial number), `kind`, `active`, `calibrationExpiresBefore` (ISO date: a calibration that expires before that day; one without calibration never matches). `calibrationExpired`: its calibration expired before today. `DELETE` (and `active=false`) retires it |
 | `GET /vehicles/positions` | The fleet board: every active vehicle with a known position, filtered by `executionPackageId`, `trackId` and `kind` on where it really is (an attached vehicle where its carrier is, which comes as `effective`) |
 | `GET /operations/{id}` | A background operation: its status and, when finished, its result or error. Only to whom asked for it or to `ops-write` |
-| `POST /actuator/republish[?executionPackageId=]`, `GET /actuator/republish/{id}` | Republish people, teams and vehicles (everything or one EP), always as a background operation (202) |
+| `POST /actuator/republish[?executionPackageId=]`, `GET /actuator/republish/{id}` | Republish people, teams, vehicles and instruments (everything, or one EP without instruments: they are of no EP), always as a background operation (202) |
 
 ## Modifying
 
@@ -64,9 +65,9 @@ route from the id in the body, like with the other services.
 
 | Code | When |
 |---|---|
-| `VAL-001`, `REQ-400`, `REQ-VALIDATION` | A request that is malformed or breaks a rule of its own content (a team without leader, 1 or 7 linemen, an incoherent model, a future `observedAt`, an expiry before the issue, a licence on a type that is not a `DRIVING_LICENCE`) |
-| `PER-404`, `UNI-404`, `VEH-404`, `VTY-404`, `PRK-404`, `QTY-404`, `QUA-404`, `VDO-404`, `OPS-404` | Not found, also the history (`/revisions`) of something without revisions: the code is the aggregate's, never `APP-404`. A qualification of another person, or a document of another vehicle, is `QUA-404` or `VDO-404` |
-| `PER-409`, `UNI-409`, `VEH-409`, `VTY-409`, `PRK-409`, `QTY-409`, `VDO-409` | A repeated code, username, employee number, plate or rail number; a second document of the same kind |
+| `VAL-001`, `REQ-400`, `REQ-VALIDATION` | A request that is malformed or breaks a rule of its own content (a team without leader, 1 or 7 linemen, an incoherent model, a future `observedAt`, an expiry before the issue or the calibration, a licence on a type that is not a `DRIVING_LICENCE`) |
+| `PER-404`, `UNI-404`, `VEH-404`, `VTY-404`, `PRK-404`, `QTY-404`, `QUA-404`, `VDO-404`, `INT-404`, `OPS-404` | Not found, also the history (`/revisions`) of something without revisions: the code is the aggregate's, never `APP-404`. A qualification of another person, or a document of another vehicle, is `QUA-404` or `VDO-404` |
+| `PER-409`, `UNI-409`, `VEH-409`, `VTY-409`, `PRK-409`, `QTY-409`, `VDO-409`, `INT-409` | A repeated code, username, employee number, plate or rail number; a second document of the same kind |
 | `QUA-001` | A qualification rule: the person already has one of that type (renew it instead), or the type is retired (also when a model asks for it) |
 | `UNI-001` | An organization rule: the crew limits, a parent of the wrong level, a head without the category, a person already in another team, a unit with active units under it |
 | `VEH-001` | A fleet rule: where a vehicle can be, towing and carrying, a retired vehicle or model, the default vehicle of an active team |

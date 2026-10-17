@@ -9,6 +9,8 @@ import com.alejandro.mtoresources.infrastructure.messaging.outbox.AsynchronousMe
 import com.alejandro.mtoresources.infrastructure.messaging.outbox.MessageContextResolver;
 import com.alejandro.mtoresources.infrastructure.messaging.rabbitmq.ResourcesRabbitMqNames;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.DrivingLicence;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.Instrument;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.InstrumentKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnit;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnitKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Person;
@@ -163,7 +165,43 @@ class MessagingContractExamplesTest {
                 ResourcesEvents.vehicle(vehicle, documents(vehicle), ResourcesEvents.DEACTIVATED, true, false));
     }
 
+    // -------------------------------------------------------------------------- instruments
+
+    @Test
+    void instrumentCreated() throws IOException {
+        check("instrument-created.json", "b0000000-0000-4000-8000-000000000010", MANAGER, REQUEST_CORRELATION_ID,
+                ResourcesEvents.instrument(earthingPole(), ResourcesEvents.CREATED));
+    }
+
+    @Test
+    void instrumentUpdated() throws IOException {
+        Instrument instrument = earthingPole();
+        instrument.setCalibratedOn(LocalDate.parse("2027-03-25"));
+        instrument.setCalibrationExpiresOn(LocalDate.parse("2028-03-24"));
+        ReflectionTestUtils.setField(instrument, "version", 1L);
+        // Recalibrada: sus fechas nuevas.
+        check("instrument-updated.json", "b0000000-0000-4000-8000-000000000011", MANAGER, REQUEST_CORRELATION_ID,
+                ResourcesEvents.instrument(instrument, ResourcesEvents.UPDATED));
+    }
+
+    @Test
+    void instrumentDeactivated() throws IOException {
+        Instrument instrument = earthingPole();
+        instrument.setActive(false);
+        ReflectionTestUtils.setField(instrument, "version", 2L);
+        check("instrument-deactivated.json", "b0000000-0000-4000-8000-000000000012", MANAGER, REQUEST_CORRELATION_ID,
+                ResourcesEvents.instrument(instrument, ResourcesEvents.DEACTIVATED));
+    }
+
     // ----------------------------------------------------------------------------- fixtures
+
+    private static Instrument earthingPole() {
+        Instrument instrument = Instrument.builder().code("PT-012").name("Earthing pole 25 kV").kind(InstrumentKind.EARTHING_POLE)
+                .serialNumber("EP25-88412").calibratedOn(LocalDate.parse("2026-04-01")).calibrationExpiresOn(LocalDate.parse("2027-03-31"))
+                .build();
+        entity(instrument, "a3000000-0000-4000-8000-000000000012");
+        return instrument;
+    }
 
     private static Person leader() {
         Person person = Person.builder().code("PER-000003").firstName("Yossi").lastName("Cohen").username("equipo.jefe")

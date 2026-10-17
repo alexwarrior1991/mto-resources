@@ -25,7 +25,7 @@ class JpaEntityModelTest {
     @Test
     void theEntitiesEditedThroughTheApiAreAudited() {
         for (Class<?> type : List.of(Person.class, OrganizationUnit.class, TeamMember.class, Vehicle.class, PersonQualification.class,
-                VehicleDocument.class)) {
+                VehicleDocument.class, Instrument.class)) {
             assertTrue(type.isAnnotationPresent(Audited.class), type.getSimpleName());
         }
     }
@@ -57,7 +57,7 @@ class JpaEntityModelTest {
      */
     @Test
     void theExpiryMarksAreNotAuditedAndHibernateNeverWritesThem() throws NoSuchFieldException {
-        for (Class<?> type : List.of(PersonQualification.class, VehicleDocument.class)) {
+        for (Class<?> type : List.of(PersonQualification.class, VehicleDocument.class, Instrument.class)) {
             for (String mark : List.of("expiringNotifiedFor", "expiredNotifiedFor")) {
                 Field field = type.getDeclaredField(mark);
                 assertTrue(field.isAnnotationPresent(NotAudited.class), type.getSimpleName() + "." + mark);

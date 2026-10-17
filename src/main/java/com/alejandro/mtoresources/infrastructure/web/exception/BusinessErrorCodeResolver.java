@@ -27,6 +27,7 @@ final class BusinessErrorCodeResolver {
             Map.entry("Qualification type", "QTY"),
             Map.entry("Person qualification", "QUA"),
             Map.entry("Vehicle document", "VDO"),
+            Map.entry("Instrument", "INT"),
             Map.entry("Background operation", "OPS")
     );
 

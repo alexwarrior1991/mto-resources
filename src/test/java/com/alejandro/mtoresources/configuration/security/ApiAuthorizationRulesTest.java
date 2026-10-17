@@ -128,6 +128,20 @@ class ApiAuthorizationRulesTest {
     }
 
     @Test
+    void instrumentsAreFleetWriteAndRetiringOneIsDelete() throws Exception {
+        expect(get(API + "/instruments"), 200, SecurityRoles.RESOURCES_READ);
+        expect(get(API + "/instruments/1/revisions"), 200, SecurityRoles.RESOURCES_READ);
+        for (MockHttpServletRequestBuilder request : new MockHttpServletRequestBuilder[]{post(API + "/instruments"), put(API + "/instruments/1"),
+                patch(API + "/instruments/1")}) {
+            expect(request, 200, SecurityRoles.RESOURCES_FLEET_WRITE);
+        }
+        expect(post(API + "/instruments"), 403, SecurityRoles.RESOURCES_READ, SecurityRoles.RESOURCES_WRITE,
+                SecurityRoles.RESOURCES_LOCATION_WRITE, SecurityRoles.RESOURCES_DELETE);
+        expect(delete(API + "/instruments/1"), 200, SecurityRoles.RESOURCES_DELETE);
+        expect(delete(API + "/instruments/1"), 403, SecurityRoles.RESOURCES_FLEET_WRITE);
+    }
+
+    @Test
     void recordingWhereAVehicleIsIsLocationWriteAndOnlyThat() throws Exception {
         expect(post(API + "/vehicles/1/locations"), 200, SecurityRoles.RESOURCES_LOCATION_WRITE);
         expect(post(API + "/vehicles/1/locations"), 403, SecurityRoles.RESOURCES_FLEET_WRITE, SecurityRoles.RESOURCES_WRITE);
@@ -189,7 +203,8 @@ class ApiAuthorizationRulesTest {
         }
         assertTrue(checked.containsAll(List.of("VehicleTypeController.update", "VehicleTypeController.patch",
                 "ParkingSiteController.update", "ParkingSiteController.patch", "PersonController.update", "VehicleController.patch",
-                "QualificationTypeController.update", "QualificationTypeController.patch")), checked.toString());
+                "QualificationTypeController.update", "QualificationTypeController.patch", "InstrumentController.update",
+                "InstrumentController.patch")), checked.toString());
     }
 
     private void expect(MockHttpServletRequestBuilder request, int status, String... roles) throws Exception {
@@ -208,30 +223,31 @@ class ApiAuthorizationRulesTest {
     @RequestMapping(SecurityConfiguration.API)
     static class Probes {
 
-        @GetMapping({"/people", "/vehicles/positions", "/qualification-types", "/people/{id}/qualifications", "/vehicles/{id}/documents"})
+        @GetMapping({"/people", "/vehicles/positions", "/qualification-types", "/people/{id}/qualifications", "/vehicles/{id}/documents",
+                "/instruments", "/instruments/{id}/revisions"})
         String read() {
             return "ok";
         }
 
         @PostMapping({"/people", "/units", "/parking-sites", "/vehicles", "/vehicles/{id}/locations", "/units/{id}/members/{person}/leave",
-                "/undeclared", "/qualification-types", "/people/{id}/qualifications", "/vehicles/{id}/documents"})
+                "/undeclared", "/qualification-types", "/people/{id}/qualifications", "/vehicles/{id}/documents", "/instruments"})
         String create() {
             return "ok";
         }
 
         @PatchMapping({"/people/{id}", "/vehicles/{id}", "/vehicle-types/{id}", "/qualification-types/{id}",
-                "/people/{id}/qualifications/{qualification}", "/vehicles/{id}/documents/{document}"})
+                "/people/{id}/qualifications/{qualification}", "/vehicles/{id}/documents/{document}", "/instruments/{id}"})
         String patchIt(@PathVariable String id) {
             return "ok";
         }
 
-        @PutMapping({"/units/{id}/members", "/qualification-types/{id}"})
+        @PutMapping({"/units/{id}/members", "/qualification-types/{id}", "/instruments/{id}"})
         String replace(@PathVariable String id) {
             return "ok";
         }
 
         @DeleteMapping({"/people/{id}", "/vehicles/{id}", "/qualification-types/{id}", "/people/{id}/qualifications/{qualification}",
-                "/vehicles/{id}/documents/{document}"})
+                "/vehicles/{id}/documents/{document}", "/instruments/{id}"})
         String remove(@PathVariable String id) {
             return "ok";
         }

@@ -101,16 +101,16 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
 
 Resource server of the `mto` realm, audience `mto-resources-api`. Client roles `resources-read`,
 `resources-write` (people and their qualifications, units, linemen, parking sites, qualification types),
-`resources-fleet-write` (vehicles and their documents, models), `resources-location-write` (only `POST /vehicles/{id}/locations`), `resources-delete`
+`resources-fleet-write` (vehicles and their documents, models, instruments), `resources-location-write` (only `POST /vehicles/{id}/locations`), `resources-delete`
 (`DELETE`, and `PUT`/`PATCH` with `active=false` through `@PreAuthorize`), `ops-metrics`, `ops-write`;
 realm roles only as `ROLE_REALM_*`. No role implies another; anything undeclared under the API is
 denied. A new role goes to `SecurityRoles` **and** `keycloak/mto-resources-partial-import.json`.
 
 ### Messaging
 
-Publishes `person` (with all its `qualifications`), `team` and `vehicle` (with all its `documents` and the
-qualification its model asks of the driver) (`created`/`updated`/`deactivated`) on `mto.resources.exchange`
-through the outbox, inside the business transaction; declares no queue (`mto-maintenance` and
+Publishes `person` (with all its `qualifications`), `team`, `vehicle` (with all its `documents` and the
+qualification its model asks of the driver) and `instrument` (`created`/`updated`/`deactivated`) on
+`mto.resources.exchange` through the outbox, inside the business transaction; declares no queue (`mto-maintenance` and
 `mto-notification` declare theirs). What `republish` publishes carries `republished: true`, and a vehicle
 event says whether that change moved its availability (`availabilityChanged`): `mto-notification` notices
 people of changes, not of republications nor of every note. Consumes

@@ -14,6 +14,7 @@ public final class ResourcesApiPaths {
     public static final String VEHICLE_TYPES = BASE + "/vehicle-types";
     public static final String VEHICLES = BASE + "/vehicles";
     public static final String VEHICLE_DOCUMENTS = VEHICLES + "/{vehicleId}/documents";
+    public static final String INSTRUMENTS = BASE + "/instruments";
     public static final String OPERATIONS = BASE + "/operations";
 
     private ResourcesApiPaths() {

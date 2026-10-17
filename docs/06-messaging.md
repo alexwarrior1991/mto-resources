@@ -20,6 +20,8 @@ publisher confirms. With `app.rabbitmq.enabled=false` the publisher is the `NoOp
 | `team.created`, `team.updated`, `team.deactivated` | `code`, `name`, `discipline`, `active`, `parentId`, `departmentId`, `executionPackageIds`, `defaultVehicle {id, code}`, `leader`, `supervisor` (head of the nearest supervision above), `chiefSupervisor`, `members` (each person as `{personId, code, fullName, username, category}`), `linemen`, `version`, `republished` |
 | `vehicle.created`, `vehicle.updated`, `vehicle.deactivated` | `code`, `name`, `type {id, code, name, mobility, category, selfPropelled, portable, seats, railGearType, transportModeAuthorised, capabilities, requiredDriverQualification}` (the code of the qualification its driver needs, or null), `registrationPlate`, `railVehicleNumber`, `operationalStatus`, `available`, `active`, `version`, `availabilityChanged`, `republished`, `documents` (all of them, the expired ones too, by `kind`: `{kind, reference, expiresOn}`) |
 
+| `instrument.created`, `instrument.updated`, `instrument.deactivated` | `code`, `name`, `kind`, `serialNumber`, `calibratedOn`, `calibrationExpiresOn`, `active`, `version`, `republished`. `deactivated` once, when it is retired; a change to a retired one is `updated` |
+
 One example per event in `messaging/examples/`, built by `MessagingContractExamplesTest` with
 `ResourcesEvents` and the real factory. **Keys are only added**; a new key or event changes its
 example in the same commit (`MESSAGING_EXAMPLES_WRITE=true` regenerates them).
@@ -52,9 +54,11 @@ example in the same commit (`MESSAGING_EXAMPLES_WRITE=true` regenerates them).
   event without a queue fails and blocks its aggregate. Locations are not published until someone
   consumes them (then as `vehicle-position`).
 - **Deployment order**: first the consumers, which declare their queues — `mto-maintenance`
-  (`mto.maintenance.resources.queue`, bound to `mto.resources.{person,team,vehicle}.*`) and
+  (`mto.maintenance.resources.queue`, bound to `mto.resources.{person,team,vehicle,instrument}.*`) and
   `mto-notification` (`mto.notification.resources.queue`, bound to `mto.resources.#`, which records
-  every event in the activity log) — then this service; and `POST /actuator/republish` to load them.
+  every event in the activity log) — then this service; and `POST /actuator/republish` to load them
+  (also after `V8`: the people, vehicles and instruments a consumer has do not carry qualifications,
+  documents, the driver qualification of their model nor the instruments until they are republished).
 
 ## Consumed: the shifts of `mto-maintenance`
 

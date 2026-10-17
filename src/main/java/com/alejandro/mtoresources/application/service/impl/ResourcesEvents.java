@@ -1,6 +1,7 @@
 package com.alejandro.mtoresources.application.service.impl;
 
 import com.alejandro.mtoresources.application.dto.messaging.DomainEvent;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.Instrument;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnit;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Person;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonQualification;
@@ -44,6 +45,7 @@ public final class ResourcesEvents {
     public static final String PERSON = "person";
     public static final String TEAM = "team";
     public static final String VEHICLE = "vehicle";
+    public static final String INSTRUMENT = "instrument";
 
     public static final String CREATED = "created";
     public static final String UPDATED = "updated";
@@ -212,6 +214,27 @@ public final class ResourcesEvents {
         ref.put("reference", document.getReference());
         ref.put("expiresOn", date(document.getExpiresOn()));
         return ref;
+    }
+
+    // -------------------------------------------------------------------------- instruments
+
+    public static DomainEvent instrument(Instrument instrument, String eventName) {
+        return instrument(instrument, eventName, false);
+    }
+
+    /** Lo que necesita quien lo elige en un turno: que es, su numero de serie y hasta cuando vale su calibracion. */
+    public static DomainEvent instrument(Instrument instrument, String eventName, boolean republished) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("code", instrument.getCode());
+        values.put("name", instrument.getName());
+        values.put("kind", name(instrument.getKind()));
+        values.put("serialNumber", instrument.getSerialNumber());
+        values.put("calibratedOn", date(instrument.getCalibratedOn()));
+        values.put("calibrationExpiresOn", date(instrument.getCalibrationExpiresOn()));
+        values.put("active", instrument.getActive());
+        values.put("version", instrument.getVersion());
+        values.put("republished", republished);
+        return new DomainEvent(INSTRUMENT, id(instrument.getId()), eventName, values);
     }
 
     private static String id(UUID id) {

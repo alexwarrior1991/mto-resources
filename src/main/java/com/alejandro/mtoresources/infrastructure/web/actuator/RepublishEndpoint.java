@@ -17,8 +17,8 @@ import java.time.Duration;
 import java.util.UUID;
 
 /**
- * {@code POST /actuator/republish} ({@code ops-write}): vuelve a publicar personas, equipos y vehiculos,
- * todo o solo lo de un EP ({@code ?executionPackageId=}). Es como arranca un consumidor nuevo. Siempre
+ * {@code POST /actuator/republish} ({@code ops-write}): vuelve a publicar personas, equipos, vehiculos e
+ * instrumentos, todo o solo lo de un EP ({@code ?executionPackageId=}, sin instrumentos). Es como arranca un consumidor nuevo. Siempre
  * en segundo plano: responde 202 con la operacion, y {@code GET /actuator/republish/{id}}
  * ({@code ops-metrics}) dice como va. Dos republicaciones no corren a la vez: comparten {@code scope}.
  */

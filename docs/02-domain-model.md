@@ -109,6 +109,16 @@ renewing it is changing that date, and one given by mistake is deleted. An expir
 change whether the vehicle is available: whether it enters a shift is for `mto-maintenance` to decide,
 with the documents every vehicle event carries.
 
+## Instruments
+
+`Instrument` is a calibrated instrument taken to the work site, a record of its own like a vehicle: an
+earthing pole (`EARTHING_POLE`), a voltage detector (`VOLTAGE_DETECTOR`), a measuring device
+(`MEASURING`) or `OTHER`. Code (upper case), name, serial number, `calibratedOn` and
+`calibrationExpiresOn` (none: no calibration that expires; never before `calibratedOn`), notes, `active`.
+It is retired, never deleted (the shifts name it); recalibrating it is changing its dates.
+`mto-maintenance` keeps a snapshot of every instrument (`instrument.*`) to pick them in a shift, and it is
+the one that refuses an inactive one or one whose calibration expired.
+
 ## Where each vehicle is
 
 `vehicle_location_event` is the append-only history; `vehicle_position` is the current position, one

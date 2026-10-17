@@ -3,11 +3,13 @@ package com.alejandro.mtoresources.application.service.impl;
 import com.alejandro.mtoresources.application.dto.operation.RepublishResult;
 import com.alejandro.mtoresources.application.service.DomainEventPublisher;
 import com.alejandro.mtoresources.application.service.RepublishService;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.Instrument;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnit;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Person;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonQualification;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Vehicle;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleDocument;
+import com.alejandro.mtoresources.infrastructure.persistence.repository.InstrumentRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.OrganizationUnitRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.PersonQualificationRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.PersonRepository;
@@ -47,19 +49,21 @@ class RepublishServiceImpl implements RepublishService {
     private final OrganizationUnitRepository unitRepository;
     private final VehicleRepository vehicleRepository;
     private final VehicleDocumentRepository documentRepository;
+    private final InstrumentRepository instrumentRepository;
     private final OrganizationLookups lookups;
     private final DomainEventPublisher events;
     private final TransactionTemplate transactions;
 
     RepublishServiceImpl(PersonRepository personRepository, PersonQualificationRepository qualificationRepository,
                          OrganizationUnitRepository unitRepository, VehicleRepository vehicleRepository,
-                         VehicleDocumentRepository documentRepository, OrganizationLookups lookups, DomainEventPublisher events,
-                         PlatformTransactionManager transactionManager) {
+                         VehicleDocumentRepository documentRepository, InstrumentRepository instrumentRepository,
+                         OrganizationLookups lookups, DomainEventPublisher events, PlatformTransactionManager transactionManager) {
         this.personRepository = personRepository;
         this.qualificationRepository = qualificationRepository;
         this.unitRepository = unitRepository;
         this.vehicleRepository = vehicleRepository;
         this.documentRepository = documentRepository;
+        this.instrumentRepository = instrumentRepository;
         this.lookups = lookups;
         this.events = events;
         this.transactions = new TransactionTemplate(transactionManager);
@@ -68,8 +72,8 @@ class RepublishServiceImpl implements RepublishService {
     @Override
     public RepublishResult republish(Long executionPackageId) {
         RepublishResult result = executionPackageId == null ? everything() : ofExecutionPackage(executionPackageId);
-        LOGGER.info("Republished {} people, {} teams and {} vehicles{}", result.people(), result.teams(), result.vehicles(),
-                executionPackageId == null ? "" : " of execution package " + executionPackageId);
+        LOGGER.info("Republished {} people, {} teams, {} vehicles and {} instruments{}", result.people(), result.teams(), result.vehicles(),
+                result.instruments(), executionPackageId == null ? "" : " of execution package " + executionPackageId);
         return result;
     }
 
@@ -77,7 +81,8 @@ class RepublishServiceImpl implements RepublishService {
         int people = pages(personRepository::findAllIds, this::people);
         int teams = pages(unitRepository::findTeamIds, this::teams);
         int vehicles = pages(vehicleRepository::findAllIds, this::vehicles);
-        return new RepublishResult(null, people, teams, vehicles);
+        int instruments = pages(instrumentRepository::findAllIds, this::instruments);
+        return new RepublishResult(null, people, teams, vehicles, instruments);
     }
 
     private RepublishResult ofExecutionPackage(Long executionPackageId) {
@@ -99,7 +104,8 @@ class RepublishServiceImpl implements RepublishService {
         int people = batches(new ArrayList<>(personIds), this::people);
         int teams = batches(teamIds, this::teams);
         int vehicles = batches(new ArrayList<>(vehicleIds), this::vehicles);
-        return new RepublishResult(executionPackageId, people, teams, vehicles);
+        // Un instrumento no es de ningun EP: sale al republicarlo todo.
+        return new RepublishResult(executionPackageId, people, teams, vehicles, 0);
     }
 
     private int people(Collection<UUID> ids) {
@@ -132,6 +138,15 @@ class RepublishServiceImpl implements RepublishService {
             vehicles.forEach(vehicle -> events.publish(ResourcesEvents.vehicle(vehicle, documents.getOrDefault(vehicle.getId(), List.of()),
                     eventName(vehicle.getActive()), false, true)));
             return vehicles.size();
+        });
+        return published == null ? 0 : published;
+    }
+
+    private int instruments(Collection<UUID> ids) {
+        Integer published = transactions.execute(status -> {
+            List<Instrument> instruments = instrumentRepository.lockAllInIdOrder(ids);
+            instruments.forEach(instrument -> events.publish(ResourcesEvents.instrument(instrument, eventName(instrument.getActive()), true)));
+            return instruments.size();
         });
         return published == null ? 0 : published;
     }

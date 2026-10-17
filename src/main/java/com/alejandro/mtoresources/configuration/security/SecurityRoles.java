@@ -22,7 +22,7 @@ public final class SecurityRoles {
      */
     public static final String RESOURCES_WRITE = "RESOURCES_WRITE";
 
-    /** Alta y modificacion de vehiculos y de sus tipos (los modelos de la flota). */
+    /** Alta y modificacion de vehiculos y de sus documentos, de sus tipos (los modelos de la flota) y de los instrumentos. */
     public static final String RESOURCES_FLEET_WRITE = "RESOURCES_FLEET_WRITE";
 
     /**
