@@ -49,6 +49,7 @@ import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleAttac
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCapability;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCategory;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleLocationKind;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleLocationSource;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleMobility;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleOperationalStatus;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.WorkDiscipline;
@@ -143,6 +144,8 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
     private VehiclePositionRepository positions;
     @Autowired
     private MaintenanceShiftEventHandler shiftHandler;
+    @Autowired
+    private FieldPositionHandler fieldHandler;
     @Autowired
     private RepublishService republish;
     @Autowired
@@ -618,6 +621,82 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         assertEquals(2L, back.position().trackId());
     }
 
+    /**
+     * El dispositivo de campo de un turno dice el kp de su vehiculo ({@code mto.field.position.reported}):
+     * queda en la via con origen FIELD y la referencia del turno, y el cierre lo sigue aparcando aunque la
+     * hora de fin escrita sea anterior a lo ultimo que dijo el dispositivo. Lo que llega despues de salir de
+     * la via, de un vehiculo desconocido o de uno que no puede estar en la via se ignora sin fallar.
+     */
+    @Test
+    void aFieldDevicePutsItsVehicleAtItsKpAndTheCloseOfTheShiftStillParksIt() {
+        VehicleResponse towerCar = railVehicle(Set.of());
+        UUID shiftId = UUID.randomUUID();
+        Instant start = Instant.now().minus(Duration.ofHours(6)).truncatedTo(ChronoUnit.SECONDS);
+        shiftHandler.handle(new IncomingEvent("shift", shiftId.toString(), "started",
+                shiftValues(start, null, List.of(towerCar.id()), List.of())), context());
+
+        fieldHandler.handle(position(towerCar.id(), shiftId, 15, "13.100", start.plus(Duration.ofHours(2))), fieldContext());
+        fieldHandler.handle(position(towerCar.id(), shiftId, 15, "12.900", start.plus(Duration.ofHours(1))), fieldContext());
+
+        VehicleResponse moving = vehicles.findById(towerCar.id());
+        assertEquals(VehicleLocationKind.ON_TRACK, moving.position().kind());
+        assertEquals(15L, moving.position().trackId());
+        assertEquals(0, new BigDecimal("13.100").compareTo(moving.position().kp()), "the late one stays in the history only");
+        assertEquals(VehicleLocationSource.FIELD, moving.position().source());
+        assertEquals("mto-maintenance:shift:" + shiftId, moving.position().sourceReference());
+        assertEquals(3, locations.history(towerCar.id(), null, null, PageRequest.of(0, 10)).content().size());
+
+        // Cerrado con una hora de fin anterior a la ultima posicion: el cierre va justo detras de ella.
+        Map<String, Object> parking = new LinkedHashMap<>();
+        parking.put("trackId", 31);
+        parking.put("kp", "4.250");
+        Map<String, Object> closed = shiftValues(start, start.plus(Duration.ofHours(1)), List.of(towerCar.id()),
+                List.of(Map.of("id", towerCar.id().toString(), "parking", parking)));
+        shiftHandler.handle(new IncomingEvent("shift", shiftId.toString(), "closed", closed), context());
+        shiftHandler.handle(new IncomingEvent("shift", shiftId.toString(), "closed", closed), context());
+        VehicleResponse parked = vehicles.findById(towerCar.id());
+        assertEquals(VehicleLocationKind.PARKED, parked.position().kind());
+        assertEquals(31L, parked.position().trackId());
+        assertEquals(start.plus(Duration.ofHours(2)).plusMillis(1), parked.position().observedAt());
+        assertEquals(4, locations.history(towerCar.id(), null, null, PageRequest.of(0, 10)).content().size(), "republished, not repeated");
+
+        // Lo que el dispositivo diga despues no lo devuelve a la via.
+        fieldHandler.handle(position(towerCar.id(), shiftId, 15, "13.500", start.plus(Duration.ofHours(3))), fieldContext());
+        assertEquals(VehicleLocationKind.PARKED, vehicles.findById(towerCar.id()).position().kind());
+
+        VehicleResponse van = vehicles.create(vehicleRequest(types.create(typeRequest(VehicleMobility.ROAD_ONLY, VehicleCategory.VAN, null,
+                false, Set.of())).id(), "P-" + random(), null));
+        fieldHandler.handle(position(van.id(), UUID.randomUUID(), 15, "1.000", start), fieldContext());
+        assertNull(vehicles.findById(van.id()).position(), "a road vehicle is never on the track");
+        fieldHandler.handle(position(UUID.randomUUID(), shiftId, 15, "1.000", start), fieldContext());
+        Map<String, Object> withoutTrack = new LinkedHashMap<>(position(towerCar.id(), shiftId, 15, "1.000", start).values());
+        withoutTrack.remove("trackId");
+        fieldHandler.handle(new IncomingEvent("position", UUID.randomUUID().toString(), "reported", withoutTrack), fieldContext());
+        assertEquals(VehicleLocationKind.PARKED, vehicles.findById(towerCar.id()).position().kind());
+    }
+
+    /**
+     * El ejemplo que publica mto-field ({@code docs/messaging/examples/position-reported.json} de alli,
+     * copiado en {@code contracts/mto-field/}) pasa por el manejador real con un vehiculo y un turno de
+     * este test: una clave renombrada alli falla aqui.
+     */
+    @Test
+    void thePositionAsMtoFieldPublishesItPutsTheVehicleAtItsKp() {
+        VehicleResponse towerCar = railVehicle(Set.of());
+        UUID shiftId = UUID.randomUUID();
+
+        fieldHandler.handle(fieldContractEvent("position-reported", shiftId, towerCar.id()), fieldContext());
+
+        VehicleResponse moving = vehicles.findById(towerCar.id());
+        assertEquals(VehicleLocationKind.ON_TRACK, moving.position().kind());
+        assertEquals(7L, moving.position().trackId());
+        assertEquals(0, new BigDecimal("34.271").compareTo(moving.position().kp()));
+        assertEquals(6L, moving.position().executionPackageId());
+        assertEquals(Instant.parse("2026-10-10T00:12:00Z"), moving.position().observedAt());
+        assertEquals(VehicleLocationSource.FIELD, moving.position().source());
+        assertEquals("mto-maintenance:shift:" + shiftId, moving.position().sourceReference());
+    }
+
     @Test
     void theDispatcherRoutesBySourceAndEntityRefusesTwoHandlersAndIgnoresTheUnknown() {
         java.util.List<String> handled = new ArrayList<>();
@@ -903,6 +982,41 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
 
     private static IncomingEventContext context() {
         return new IncomingEventContext("mto-maintenance", null, UUID.randomUUID().toString());
+    }
+
+    /** El ejemplo de mto-field con su turno y su vehiculo cambiados por los de este test. */
+    private static IncomingEvent fieldContractEvent(String name, UUID shiftId, UUID vehicleId) {
+        try (java.io.InputStream json = BusinessLayerTest.class.getResourceAsStream("/contracts/mto-field/" + name + ".json")) {
+            String text = new String(java.util.Objects.requireNonNull(json, name).readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+                    .replace("f0000000-0000-4000-8000-000000000007", vehicleId.toString())
+                    .replace("90000000-0000-4000-8000-000000000001", shiftId.toString());
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = (Map<String, Object>) tools.jackson.databind.json.JsonMapper.builder().build()
+                    .readValue(text, Map.class).get("data");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> values = (Map<String, Object>) data.get("values");
+            return new IncomingEvent((String) data.get("entityName"), (String) data.get("entityId"), (String) data.get("eventName"), values);
+        } catch (java.io.IOException failure) {
+            throw new java.io.UncheckedIOException(failure);
+        }
+    }
+
+    private static IncomingEventContext fieldContext() {
+        return new IncomingEventContext("mto-field", null, UUID.randomUUID().toString());
+    }
+
+    /** Una posicion como la publica mto-field: el vehiculo del dispositivo, su turno, su via y su kp. */
+    private static IncomingEvent position(UUID vehicleId, UUID shiftId, long trackId, String kp, Instant observedAt) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("code", "PO-000012");
+        values.put("shiftId", shiftId.toString());
+        values.put("deviceId", "dev-1");
+        values.put("vehicleId", vehicleId.toString());
+        values.put("trackId", trackId);
+        values.put("kp", kp);
+        values.put("executionPackageId", 6);
+        values.put("observedAt", observedAt.toString());
+        return new IncomingEvent("position", UUID.randomUUID().toString(), "reported", values);
     }
 
     private static void authenticateAs(String username) {

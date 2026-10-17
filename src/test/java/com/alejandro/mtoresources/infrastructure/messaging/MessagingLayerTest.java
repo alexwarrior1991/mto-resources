@@ -8,6 +8,12 @@ import com.alejandro.mtoresources.application.service.IncomingEventProcessor;
 import com.alejandro.mtoresources.configuration.messaging.MessagePayloadSignatureVerifier;
 import com.alejandro.mtoresources.configuration.messaging.MessageSignatureMode;
 import com.alejandro.mtoresources.configuration.messaging.MessageSignatureProperties;
+import com.alejandro.mtoresources.configuration.rabbitmq.FieldRabbitProperties;
+import com.alejandro.mtoresources.configuration.rabbitmq.MaintenanceRabbitProperties;
+import com.alejandro.mtoresources.configuration.rabbitmq.RabbitMqConfiguration;
+import com.alejandro.mtoresources.configuration.rabbitmq.ResourcesEventsProperties;
+import com.alejandro.mtoresources.infrastructure.messaging.rabbitmq.FieldEventConsumer;
+import com.alejandro.mtoresources.infrastructure.messaging.rabbitmq.FieldRabbitMqNames;
 import com.alejandro.mtoresources.infrastructure.messaging.rabbitmq.MaintenanceEventConsumer;
 import com.alejandro.mtoresources.infrastructure.messaging.rabbitmq.MaintenanceRabbitMqNames;
 import com.alejandro.mtoresources.infrastructure.messaging.rabbitmq.ResourcesRabbitMqNames;
@@ -30,7 +36,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
-/** El consumidor de los turnos de {@code mto-maintenance} y los nombres del canal propio. */
+/** Los consumidores de los turnos de {@code mto-maintenance} y de las posiciones de {@code mto-field}, su topologia y los nombres del canal propio. */
 class MessagingLayerTest {
 
     private final IncomingEventProcessor processor = mock(IncomingEventProcessor.class);
@@ -58,6 +64,35 @@ class MessagingLayerTest {
         assertThrows(AmqpRejectAndDontRequeueException.class, () -> consumer.onMaintenanceEvent(
                 message("mto-maintenance", new IncomingEvent("shift", "1", " ", Map.of())), raw(1L)));
         verify(processor, never()).process(any(), any());
+    }
+
+    @Test
+    void aPositionOfFieldReachesTheInboxAndOneFromAnotherServiceGoesToTheDeadLetterQueue() {
+        FieldEventConsumer field = new FieldEventConsumer(processor,
+                new MessagePayloadSignatureVerifier(new MessageSignatureProperties(null, MessageSignatureMode.OPTIONAL)));
+        IncomingEvent position = new IncomingEvent("position", UUID.randomUUID().toString(), "reported", Map.of());
+
+        assertThrows(AmqpRejectAndDontRequeueException.class, () -> field.onFieldEvent(message("mto-maintenance", position), raw(1L)));
+        verify(processor, never()).process(any(), any());
+        field.onFieldEvent(message("mto-field", position), raw(7L));
+        ArgumentCaptor<InboxMessageCommand> command = ArgumentCaptor.forClass(InboxMessageCommand.class);
+        verify(processor).process(command.capture(), any());
+        assertEquals("mto-field", command.getValue().sourceService());
+    }
+
+    /** La cola de las posiciones es de este servicio, atada al exchange de telemetria de mto-field (no al de sus eventos) y con su descarte. */
+    @Test
+    void theQueueOfThePositionsIsBoundToTheTelemetryExchangeWithItsDeadLetter() {
+        RabbitMqConfiguration topology = new RabbitMqConfiguration(new MaintenanceRabbitProperties(null, null, null, null, null, null),
+                new FieldRabbitProperties(null, null, null, null, null, null), new ResourcesEventsProperties(null));
+
+        org.springframework.amqp.core.Queue queue = topology.fieldQueue();
+        assertEquals(FieldRabbitMqNames.RESOURCES_FIELD_QUEUE, queue.getName());
+        assertEquals("mto.resources.field.queue.dlx", queue.getArguments().get(MaintenanceRabbitMqNames.ARG_DEAD_LETTER_EXCHANGE));
+        assertEquals("mto.field.telemetry.exchange", topology.fieldTelemetryExchange().getName());
+        org.springframework.amqp.core.Binding binding = topology.fieldBinding(queue, topology.fieldTelemetryExchange());
+        assertEquals("mto.field.position.*", binding.getRoutingKey());
+        assertEquals("mto.field.telemetry.exchange", binding.getExchange());
     }
 
     @Test

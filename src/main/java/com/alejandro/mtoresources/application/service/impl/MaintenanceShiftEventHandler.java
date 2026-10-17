@@ -12,6 +12,7 @@ import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleLocat
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleLocationSource;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleMobility;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehiclePosition;
+import com.alejandro.mtoresources.infrastructure.persistence.repository.VehicleLocationEventRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.VehiclePositionRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.VehicleRepository;
 import lombok.RequiredArgsConstructor;
@@ -43,7 +44,9 @@ import java.util.UUID;
  *   <li>{@code closed}, y {@code cancelled} de un turno que llego a empezar: {@code PARKED} donde el turno
  *       dice que se dejo cada uno ({@code vehicles[].parking}), si no en su {@code parkingPlace} (y, en uno de
  *       solo via, en su primera via), y si no {@code UNKNOWN}. Solo los que siguen donde los dejo ese
- *       turno: uno que alguien ya movio a mano no se toca. Lo enganchado a ellos los sigue solo.</li>
+ *       turno (o su dispositivo de campo, que usa la misma referencia): uno que alguien ya movio a mano no
+ *       se toca. Lo enganchado a ellos los sigue solo. Si el dispositivo informo despues de la hora de fin
+ *       escrita, el cierre se apunta justo detras de su ultima posicion.</li>
  * </ul>
  *
  * <p>Un evento sin {@code vehicleIds} (un mantenimiento anterior) no mueve nada. Lo que una regla de la
@@ -63,6 +66,7 @@ class MaintenanceShiftEventHandler implements IncomingEventHandler {
 
     private final VehicleRepository vehicleRepository;
     private final VehiclePositionRepository positionRepository;
+    private final VehicleLocationEventRepository locationEvents;
     private final VehicleLocationService locationService;
     private final Clock clock;
 
@@ -133,19 +137,25 @@ class MaintenanceShiftEventHandler implements IncomingEventHandler {
                 LOGGER.debug("Vehicle {} was moved after shift {}: it stays where it is", vehicle.getCode(), code);
                 continue;
             }
+            // El dispositivo del turno pudo decir donde estaba despues de la hora de fin que se escribio al
+            // cerrar: el cierre va justo detras de esa posicion, o la marca de agua lo dejaria en la via.
+            Instant endedAt = locationEvents.findLastObservedAt(vehicleId, reference, VehicleLocationSource.FIELD)
+                    .filter(lastSeen -> !lastSeen.isBefore(observedAt))
+                    .map(lastSeen -> lastSeen.plusMillis(1))
+                    .orElse(observedAt);
             Map<?, ?> parking = parkings.get(vehicleId);
             VehicleLocationRequest request;
             if (parking != null && (parking.get("siteId") != null || parking.get("trackId") != null || parking.get("description") != null)) {
                 request = location(VehicleLocationKind.PARKED, uuid(parking.get("siteId")).orElse(null), executionPackageId,
                         number(parking.get("trackId")).map(BigDecimal::longValue).orElse(null),
-                        number(parking.get("kp")).orElse(null), text(parking.get("description")).orElse(null), observedAt);
+                        number(parking.get("kp")).orElse(null), text(parking.get("description")).orElse(null), endedAt);
             } else if (parkingPlace.isPresent()) {
                 Long track = vehicle.getType().getMobility() == VehicleMobility.RAIL_ONLY ? firstTrack : null;
-                request = location(VehicleLocationKind.PARKED, null, executionPackageId, track, null, parkingPlace.get(), observedAt);
+                request = location(VehicleLocationKind.PARKED, null, executionPackageId, track, null, parkingPlace.get(), endedAt);
             } else {
-                request = location(VehicleLocationKind.UNKNOWN, null, executionPackageId, null, null, "After shift " + code, observedAt);
+                request = location(VehicleLocationKind.UNKNOWN, null, executionPackageId, null, null, "After shift " + code, endedAt);
             }
-            record(vehicle, request, reference, observedAt);
+            record(vehicle, request, reference, endedAt);
         }
     }
 
@@ -217,7 +227,7 @@ class MaintenanceShiftEventHandler implements IncomingEventHandler {
         return ids;
     }
 
-    private static Optional<UUID> uuid(Object value) {
+    static Optional<UUID> uuid(Object value) {
         if (value == null) {
             return Optional.empty();
         }
@@ -228,7 +238,7 @@ class MaintenanceShiftEventHandler implements IncomingEventHandler {
         }
     }
 
-    private static Optional<BigDecimal> number(Object value) {
+    static Optional<BigDecimal> number(Object value) {
         if (value == null) {
             return Optional.empty();
         }
@@ -239,7 +249,7 @@ class MaintenanceShiftEventHandler implements IncomingEventHandler {
         }
     }
 
-    private static Optional<Instant> instant(Object value) {
+    static Optional<Instant> instant(Object value) {
         if (value == null) {
             return Optional.empty();
         }
@@ -250,7 +260,7 @@ class MaintenanceShiftEventHandler implements IncomingEventHandler {
         }
     }
 
-    private static Optional<String> text(Object value) {
+    static Optional<String> text(Object value) {
         if (value == null || value.toString().isBlank()) {
             return Optional.empty();
         }

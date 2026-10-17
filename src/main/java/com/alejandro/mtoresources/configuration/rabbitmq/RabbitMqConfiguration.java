@@ -2,6 +2,7 @@ package com.alejandro.mtoresources.configuration.rabbitmq;
 
 import com.alejandro.mtoresources.application.service.IncomingEventProcessor;
 import com.alejandro.mtoresources.configuration.messaging.MessagePayloadSignatureVerifier;
+import com.alejandro.mtoresources.infrastructure.messaging.rabbitmq.FieldEventConsumer;
 import com.alejandro.mtoresources.infrastructure.messaging.rabbitmq.MaintenanceEventConsumer;
 import com.alejandro.mtoresources.infrastructure.messaging.rabbitmq.MaintenanceRabbitMqNames;
 import com.alejandro.mtoresources.infrastructure.messaging.rabbitmq.RabbitListenerContainerFactoryNames;
@@ -48,13 +49,14 @@ import tools.jackson.databind.json.JsonMapper;
  */
 @Configuration
 @RequiredArgsConstructor
-@EnableConfigurationProperties({MaintenanceRabbitProperties.class, ResourcesEventsProperties.class})
+@EnableConfigurationProperties({MaintenanceRabbitProperties.class, FieldRabbitProperties.class, ResourcesEventsProperties.class})
 @ConditionalOnProperty(prefix = "app.rabbitmq", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class RabbitMqConfiguration {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RabbitMqConfiguration.class);
 
     private final MaintenanceRabbitProperties properties;
+    private final FieldRabbitProperties fieldProperties;
     private final ResourcesEventsProperties eventsProperties;
 
     /**
@@ -157,13 +159,76 @@ public class RabbitMqConfiguration {
             SimpleRabbitListenerContainerFactoryConfigurer configurer,
             ConnectionFactory connectionFactory,
             MessageConverter incomingEventMessageConverter) {
+        return listenerContainerFactory(configurer, connectionFactory, incomingEventMessageConverter);
+    }
 
+    /** La de las posiciones de mto-field: la misma configuracion, en su propia factory, para que cada cola tenga la suya. */
+    @Bean(RabbitListenerContainerFactoryNames.FIELD)
+    public SimpleRabbitListenerContainerFactory fieldRabbitListenerContainerFactory(
+            SimpleRabbitListenerContainerFactoryConfigurer configurer,
+            ConnectionFactory connectionFactory,
+            MessageConverter incomingEventMessageConverter) {
+        return listenerContainerFactory(configurer, connectionFactory, incomingEventMessageConverter);
+    }
+
+    private static SimpleRabbitListenerContainerFactory listenerContainerFactory(SimpleRabbitListenerContainerFactoryConfigurer configurer,
+                                                                                 ConnectionFactory connectionFactory,
+                                                                                 MessageConverter converter) {
         SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
         configurer.configure(factory, connectionFactory);
-        factory.setMessageConverter(incomingEventMessageConverter);
+        factory.setMessageConverter(converter);
         factory.setDefaultRequeueRejected(false);
-
         return factory;
+    }
+
+    /**
+     * Exchange de la telemetria de {@code mto-field}, redeclarado con los atributos del emisor (topic,
+     * durable), y la cola de este servicio con su descarte: las posiciones de los dispositivos de un turno.
+     */
+    @Bean
+    public TopicExchange fieldTelemetryExchange() {
+        return new TopicExchange(fieldProperties.exchange(), true, false);
+    }
+
+    @Bean
+    public Queue fieldQueue() {
+        return QueueBuilder.durable(fieldProperties.queue())
+                .withArgument(MaintenanceRabbitMqNames.ARG_DEAD_LETTER_EXCHANGE, fieldProperties.deadLetterExchange())
+                .withArgument(MaintenanceRabbitMqNames.ARG_DEAD_LETTER_ROUTING_KEY, fieldProperties.deadLetterRoutingKey())
+                .build();
+    }
+
+    @Bean
+    public Binding fieldBinding(Queue fieldQueue, TopicExchange fieldTelemetryExchange) {
+        return BindingBuilder.bind(fieldQueue).to(fieldTelemetryExchange).with(fieldProperties.routingKey());
+    }
+
+    @Bean
+    public DirectExchange fieldDeadLetterExchange() {
+        return new DirectExchange(fieldProperties.deadLetterExchange(), true, false);
+    }
+
+    @Bean
+    public Queue fieldDeadLetterQueue() {
+        return QueueBuilder.durable(fieldProperties.deadLetterQueue()).build();
+    }
+
+    @Bean
+    public Binding fieldDeadLetterBinding(Queue fieldDeadLetterQueue, DirectExchange fieldDeadLetterExchange) {
+        return BindingBuilder.bind(fieldDeadLetterQueue).to(fieldDeadLetterExchange).with(fieldProperties.deadLetterRoutingKey());
+    }
+
+    /** Consumidor de las posiciones, con su interruptor ({@code app.rabbitmq.field.listener-enabled}). */
+    @Bean
+    @ConditionalOnProperty(
+            prefix = "app.rabbitmq.field", name = "listener-enabled",
+            havingValue = "true", matchIfMissing = true)
+    public FieldEventConsumer fieldEventConsumer(
+            IncomingEventProcessor incomingEventProcessor,
+            MessagePayloadSignatureVerifier signatureVerifier) {
+        LOGGER.info("Field position consumer enabled: queue={}, boundTo={} with routingKey={}, deadLetterQueue={}",
+                fieldProperties.queue(), fieldProperties.exchange(), fieldProperties.routingKey(), fieldProperties.deadLetterQueue());
+        return new FieldEventConsumer(incomingEventProcessor, signatureVerifier);
     }
 
     /**

@@ -68,7 +68,30 @@ and entity to the `IncomingEventHandler`s; an unknown entity is logged and ignor
 same `observedAt` is never recorded twice, so a republication of a shift does not repeat anything. An
 event without `vehicleIds` (an older `mto-maintenance`) moves nothing.
 
+When the field device of the shift reported a position after the `actualEnd` written at closing, the
+close is recorded one millisecond after the last `FIELD` position of that shift (`findLastObservedAt`):
+the same `observedAt` every time, so a republication does not repeat it either.
+
 The examples `mto-maintenance` versions for these three events (`docs/messaging/examples/shift-started.json`,
 `shift-closed.json` and `shift-cancelled.json` there) are copied in
 `src/test/resources/contracts/mto-maintenance/`, and `BusinessLayerTest` passes them through the real
 handler with a vehicle of its own: a key renamed there fails here, not in a vehicle's position.
+
+## Consumed: the positions of `mto-field`
+
+Queue `mto.resources.field.queue` (declared here, with its DLX `...queue.dlx` and DLQ `...queue.dlq`),
+bound to `mto.field.telemetry.exchange` with `mto.field.position.*` (`app.rabbitmq.field.*`). It is a
+different exchange from the events of `mto-field` (`mto.field.exchange`), because `mto-notification`
+records everything that reaches that one and a position per minute and vehicle is not activity. The
+consumer (`FieldEventConsumer`, a copy of the one of the shifts) checks the signature and that the
+envelope comes from `mto-field`; the same idempotent inbox (`source_service = mto-field`) decides whether
+it runs, and `FieldPositionHandler` applies it (`02-domain-model.md`, *Derived from the field devices*).
+
+`position.reported` carries in `values`: `code` (the possession), `shiftId`, `shiftCode`, `teamCode`,
+`deviceId`, `vehicleId`, `trackId`, `kp`, `executionPackageId`, `observedAt` and `reportedBy`. Each position is an
+aggregate of its own in the outbox of `mto-field` (nothing waits behind a failed one: the watermark,
+not the order, decides). This queue must exist before `mto-field` publishes positions (`mandatory=true`
+there): deploy this service first. The example `mto-field` versions
+(`docs/messaging/examples/position-reported.json` there) is copied in
+`src/test/resources/contracts/mto-field/` and `BusinessLayerTest` passes it through the real handler.
+

@@ -141,6 +141,16 @@ app:
       dead-letter-queue: ${APP_RABBITMQ_MAINTENANCE_DEAD_LETTER_QUEUE:mto.resources.maintenance.queue.dlq}
       dead-letter-routing-key: ${APP_RABBITMQ_MAINTENANCE_DEAD_LETTER_ROUTING_KEY:mto.resources.maintenance.queue.dlq}
       listener-enabled: ${APP_RABBITMQ_MAINTENANCE_LISTENER_ENABLED:true}
+    # Lo que se escucha de mto-field: las posiciones de los dispositivos de un turno, por su exchange de
+    # telemetria (no por mto.field.exchange, que registra mto-notification). La cola y su DLQ son de aqui.
+    field:
+      exchange: ${APP_RABBITMQ_FIELD_EXCHANGE:mto.field.telemetry.exchange}
+      queue: ${APP_RABBITMQ_FIELD_QUEUE:mto.resources.field.queue}
+      routing-key: "${APP_RABBITMQ_FIELD_ROUTING_KEY:mto.field.position.*}"
+      dead-letter-exchange: ${APP_RABBITMQ_FIELD_DEAD_LETTER_EXCHANGE:mto.resources.field.queue.dlx}
+      dead-letter-queue: ${APP_RABBITMQ_FIELD_DEAD_LETTER_QUEUE:mto.resources.field.queue.dlq}
+      dead-letter-routing-key: ${APP_RABBITMQ_FIELD_DEAD_LETTER_ROUTING_KEY:mto.resources.field.queue.dlq}
+      listener-enabled: ${APP_RABBITMQ_FIELD_LISTENER_ENABLED:true}
     # Exchange propio: personas, equipos y vehiculos, con la clave mto.resources.<entidad>.<evento>.
     # Solo se declara el exchange; las colas son de quien consume (mto-maintenance).
     events:

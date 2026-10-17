@@ -110,7 +110,9 @@ through the outbox, inside the business transaction; declares no queue (`mto-mai
 event says whether that change moved its availability (`availabilityChanged`): `mto-notification` notices
 people of changes, not of republications nor of every note. Consumes
 `mto.maintenance.shift.*` on its own queue `mto.resources.maintenance.queue` (DLX/DLQ) through the
-idempotent inbox. **Keys are only added**; a new key or event changes its example in
+idempotent inbox, and the positions of the field devices (`mto.field.position.*` on
+`mto.field.telemetry.exchange`, queue `mto.resources.field.queue`, `FieldPositionHandler`): `ON_TRACK` with
+`source = FIELD` and the reference of the shift, ignored once that shift left the track. **Keys are only added**; a new key or event changes its example in
 `docs/messaging/examples/` in the same commit. The other way round, the shift examples of
 `mto-maintenance` are copied in `src/test/resources/contracts/mto-maintenance/` and `BusinessLayerTest`
 runs them through the real handler: a change of those examples is copied here in the same change.

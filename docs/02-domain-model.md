@@ -101,3 +101,16 @@ retired vehicle does not move; `observedAt` is never in the future (one minute o
   since stays. Whatever is attached to them follows on its own.
 - What a fleet rule refuses is recorded as `UNKNOWN` with the reason instead of failing the message;
   the fine detail (where it on-tracked, the low loader) is corrected by hand.
+- If the field device of the shift reported after the `actualEnd` written at closing, the close is
+  recorded one millisecond after its last position: otherwise the watermark would leave it on the track.
+
+### Derived from the field devices
+
+`mto.field.position.reported` (`mto-field`): the device of a shift says the kp of its vehicle. It goes
+`ON_TRACK` on that track and kp with `source = FIELD` and the same reference as the shift
+(`mto-maintenance:shift:<id>`), so that the close of the shift still parks it. A late one stays in the
+history and moves nothing (the watermark). What cannot apply is logged and ignored, never sent to the DLQ:
+a vehicle not in the fleet or retired, a position without a track or a shift, what `FleetRules` refuses
+(a road vehicle is never on the track), and one of a shift that already left the track (its vehicle is
+`PARKED` or `UNKNOWN` by that same shift): `mto-field` stops publishing at the clear-of-track, and what
+arrives afterwards cannot put the vehicle back on the track.

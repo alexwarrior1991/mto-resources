@@ -1,6 +1,7 @@
 package com.alejandro.mtoresources.infrastructure.persistence.repository;
 
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleLocationEvent;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleLocationSource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -8,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface VehicleLocationEventRepository extends JpaRepository<VehicleLocationEvent, UUID> {
@@ -24,4 +26,18 @@ public interface VehicleLocationEventRepository extends JpaRepository<VehicleLoc
 
     /** Si ya se aplico un evento de turno a un vehiculo: una reentrega o una republicacion no lo repite. */
     boolean existsByVehicleIdAndSourceReferenceAndObservedAt(UUID vehicleId, String sourceReference, Instant observedAt);
+
+    /**
+     * Lo ultimo que un origen dijo de un vehiculo con esa referencia: la ultima posicion que el
+     * dispositivo de un turno mando, para que el cierre del turno no quede por detras de ella. El origen
+     * va como parametro, no como literal (un literal de enumerado en JPQL no casa con la columna).
+     */
+    @Query("""
+            select max(e.observedAt) from VehicleLocationEvent e
+             where e.vehicle.id = :vehicleId
+               and e.sourceReference = :sourceReference
+               and e.source = :source
+            """)
+    Optional<Instant> findLastObservedAt(@Param("vehicleId") UUID vehicleId, @Param("sourceReference") String sourceReference,
+                                         @Param("source") VehicleLocationSource source);
 }
