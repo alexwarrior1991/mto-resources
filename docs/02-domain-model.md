@@ -90,9 +90,12 @@ their figures. `FleetRules.typeViolation` keeps a model coherent (400 otherwise)
 
 A model also says the qualification its driver needs (`requiredDriverQualification`, a
 `QualificationType`, or none). A model created without saying it takes the one of its mobility
-(`FleetRules.defaultDriverQualification`): a self-propelled rail-only one, `RAIL-DRIVER`; a road-rail one,
-`RR-OPERATOR`; a road-only one, the licence it asks for (`LIC-B`, `LIC-C`, `LIC-CE`), or none. `V8` filled
-the existing models with the same rule. It can be changed or emptied; a retired qualification type is
+(`FleetRules.defaultDriverQualification`), only when it moves by itself: a rail-only one, `RAIL-DRIVER`; a
+road-rail one, `RR-OPERATOR`; a road-only one, the licence it asks for (`LIC-B`, `LIC-C`, `LIC-CE`), or none.
+One that is not self-propelled (a wagon, a road-rail or road trailer) is towed or carried, not driven, and
+takes none. `V8` filled the existing models with the rule of then, which also gave `RR-OPERATOR` to a
+road-rail trailer and the licence to a road one; `V10` empties exactly those values (another one chosen by
+hand stays). It can be changed or emptied; a retired qualification type is
 not asked for (409 `QUA-001`). Who checks that the crew of a shift has a distinct driver with it for
 every self-propelled vehicle is `mto-maintenance`.
 

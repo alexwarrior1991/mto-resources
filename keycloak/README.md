@@ -73,8 +73,8 @@ Para probarlos, `mto-resources-dev.json` trae un usuario por puesto (contraseña
 | `mantenimiento.jefe` | `mto-position-chief-maintenance` |
 | `proyecto.jefe` | `mto-position-project-manager` |
 
-El operario y el jefe de equipo están en el grupo `EQ-NORTE` de `mto-field` (que lo declara en su
-parcial, aplicada antes que los ficheros de desarrollo): con `field-team`, se unen a los turnos del
-equipo de ese código. El supervisor y el jefe de supervisores no necesitan grupo, porque con
-`field-supervise` se unen a cualquier turno. Los grupos de `mto-field` (`EQ-NORTE`, `EQ-SUR`) no se
-llaman como los equipos de mantenimiento (`A`, `B`); unificarlos es de la fase siguiente.
+El operario y el jefe de equipo están en el grupo `A` de `mto-field` (que lo declara en su parcial,
+aplicada antes que los ficheros de desarrollo): con `field-team`, se unen a los turnos del equipo
+`A` de `mto-maintenance`, porque un grupo se llama como el código de su equipo. El supervisor y el
+jefe de supervisores no necesitan grupo, porque con `field-supervise` se unen a cualquier turno. Un
+turno con dotación de `mto-resources` no mira el grupo: se une quien va en ella.

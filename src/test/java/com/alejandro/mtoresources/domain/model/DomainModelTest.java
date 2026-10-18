@@ -254,6 +254,10 @@ class DomainModelTest {
         assertEquals(Optional.of("RAIL-DRIVER"), FleetRules.defaultDriverQualification(VehicleMobility.RAIL_ONLY, true, null));
         assertEquals(Optional.empty(), FleetRules.defaultDriverQualification(VehicleMobility.RAIL_ONLY, false, null), "A wagon is not driven");
         assertEquals(Optional.of("RR-OPERATOR"), FleetRules.defaultDriverQualification(VehicleMobility.ROAD_RAIL, true, DrivingLicence.C));
+        assertEquals(Optional.empty(), FleetRules.defaultDriverQualification(VehicleMobility.ROAD_RAIL, false, null),
+                "A road-rail trailer is towed, not driven");
+        assertEquals(Optional.empty(), FleetRules.defaultDriverQualification(VehicleMobility.ROAD_ONLY, false, DrivingLicence.C_E),
+                "Nor a road trailer, whatever licence towing it takes");
         assertEquals(Optional.of("LIC-B"), FleetRules.defaultDriverQualification(VehicleMobility.ROAD_ONLY, true, DrivingLicence.B));
         assertEquals(Optional.of("LIC-C"), FleetRules.defaultDriverQualification(VehicleMobility.ROAD_ONLY, true, DrivingLicence.C));
         assertEquals(Optional.of("LIC-CE"), FleetRules.defaultDriverQualification(VehicleMobility.ROAD_ONLY, true, DrivingLicence.C_E));

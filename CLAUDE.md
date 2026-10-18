@@ -109,8 +109,10 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
   unknown one is 404 `TAP-404`. The answer keeps `accessPoint` as the free text and adds `trackAccessPoint
   {id, name, kind}` (a new key: a published key never changes type).
 - **A model is coherent with its mobility** (`FleetRules.typeViolation`); a vehicle carries what its
-  model needs (plate if it runs on the road, rail number if it may run on open track). A model that does
-  not say the qualification of its driver takes the one of its mobility (`FleetRules.defaultDriverQualification`).
+  model needs (plate if it runs on the road, rail number if it may run on open track). A self-propelled
+  model that does not say the qualification of its driver takes the one of its mobility
+  (`FleetRules.defaultDriverQualification`); one that does not move by itself (a wagon, a trailer) has
+  none by default, because it is towed or carried, not driven (`V10` emptied what `V8` had given them).
 - **Permission ≠ position.** Keycloak profiles say what someone may do; the tree says whom they lead.
   This service never writes the realm. The position profiles (`mto-position-*`) live in
   `mto-platform/keycloak/mto-positions-cross-service.json`.

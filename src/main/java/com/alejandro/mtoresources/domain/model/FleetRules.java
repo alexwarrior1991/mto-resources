@@ -216,14 +216,19 @@ public final class FleetRules {
     public static final String ROAD_RAIL_OPERATOR = "RR-OPERATOR";
 
     /**
-     * La habilitacion que exige conducir un modelo que no la dice, por su movilidad: una de solo via
-     * autopropulsada, conductor de vehiculo auxiliar; una bivial, operador de bivial; una de carretera, el
-     * permiso que pide. La misma regla rellena los modelos que ya existian (V8). Es el codigo del tipo de
-     * cualificacion; vacio, ninguna (un vagon, una vagoneta, una de carretera que no dice permiso).
+     * La habilitacion que exige conducir un modelo que no la dice, por su movilidad: una de solo via,
+     * conductor de vehiculo auxiliar; una bivial, operador de bivial; una de carretera, el permiso que pide.
+     * Solo si se mueve sola: lo que no es autopropulsado (un vagon, un remolque bivial o de carretera) no se
+     * conduce, lo lleva otro, y mto-maintenance solo busca conductor para los autopropulsados. V8 relleno
+     * con ella los modelos que ya existian, y V10 vacio lo que habia puesto a los que no se mueven solos.
+     * Es el codigo del tipo de cualificacion; vacio, ninguna.
      */
     public static Optional<String> defaultDriverQualification(VehicleMobility mobility, boolean selfPropelled, DrivingLicence licence) {
+        if (!selfPropelled) {
+            return Optional.empty();
+        }
         return switch (mobility) {
-            case RAIL_ONLY -> selfPropelled ? Optional.of(RAIL_DRIVER) : Optional.empty();
+            case RAIL_ONLY -> Optional.of(RAIL_DRIVER);
             case ROAD_RAIL -> Optional.of(ROAD_RAIL_OPERATOR);
             case ROAD_ONLY -> Optional.ofNullable(licence).map(FleetRules::licenceQualification);
         };

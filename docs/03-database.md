@@ -22,6 +22,7 @@ columns without a foreign key.
 | `V7` | The seed: project `MTO` and department `MNT`, with a `BASELINE` revision |
 | `V8` | `qualification_type` (with its seeds), `person_qualification`, `vehicle_document`, `instrument` and their `_aud`; `vehicle_type.required_driver_qualification_type_id` with its backfill |
 | `V9` | `track_access_point` (the snapshot of the track access points of `mto-configuration`); `vehicle_location_event.access_point_id` |
+| `V10` | Empties the driver qualification `V8` (or the default of then) gave to a model that is not self-propelled: `RR-OPERATOR` on a road-rail one, the licence on a road one; another value chosen by hand stays |
 
 ## People and organization (`V5`)
 
@@ -67,7 +68,7 @@ read-then-write.
 | `qualification_type` | `code` (upper case, 32), `name`, `kind`, `driving_licence`, `validity_months`, `description`, `active`, `version` | `code` unique and upper; `driving_licence` if and only if `kind = 'DRIVING_LICENCE'`; `validity_months > 0`. Seeded with fixed ids: `LIC-B`, `LIC-C`, `LIC-CE`, `RAIL-DRIVER`, `RR-OPERATOR` |
 | `person_qualification` | `person_id`, `qualification_type_id`, `reference` (60), `issued_on`, `expires_on` (null: does not expire), `notes` (500), `expiring_notified_for`, `expired_notified_for`, `version` | **one per type** (`uq_person_qualification (person_id, qualification_type_id)`); `expires_on >= issued_on`; index on `expires_on` |
 | `vehicle_document` | `vehicle_id`, `kind`, `reference` (60), `issued_on`, `expires_on` (not null), `notes` (500), `expiring_notified_for`, `expired_notified_for`, `version` | **one per kind** (`uq_vehicle_document (vehicle_id, kind)`); `expires_on >= issued_on`; index on `expires_on` |
-| `vehicle_type.required_driver_qualification_type_id` | the qualification its driver needs (null: none) | foreign key to `qualification_type`. `V8` fills it for the existing models: a self-propelled `RAIL_ONLY` one, `RAIL-DRIVER`; a `ROAD_RAIL` one, `RR-OPERATOR`; a `ROAD_ONLY` one with a `required_licence`, `LIC-B`/`LIC-C`/`LIC-CE` (and bumps their `version`) |
+| `vehicle_type.required_driver_qualification_type_id` | the qualification its driver needs (null: none) | foreign key to `qualification_type`. `V8` fills it for the existing models: a self-propelled `RAIL_ONLY` one, `RAIL-DRIVER`; a `ROAD_RAIL` one, `RR-OPERATOR`; a `ROAD_ONLY` one with a `required_licence`, `LIC-B`/`LIC-C`/`LIC-CE` (and bumps their `version`). `V10` empties it again on the models that are not self-propelled (a road-rail or road trailer is not driven), only where it holds that value, and bumps their `version` |
 | `instrument` | `code` (upper case, 32), `name`, `kind`, `serial_number` (60), `calibrated_on`, `calibration_expires_on` (null: no calibration), `notes` (500), `active`, `expiring_notified_for`, `expired_notified_for`, `version` | `code` unique and upper; `calibration_expires_on >= calibrated_on`; index on `calibration_expires_on` |
 
 Enums: `qualification_kind` (`DRIVING_LICENCE`, `VEHICLE_OPERATION`, `SAFETY`, `OTHER`),
