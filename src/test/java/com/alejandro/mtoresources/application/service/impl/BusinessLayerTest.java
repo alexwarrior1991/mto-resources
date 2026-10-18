@@ -540,6 +540,10 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
                 DrivingLicence.C, null)).requiredDriverQualification().code());
         assertNull(types.create(driverTypeRequest(VehicleMobility.ROAD_ONLY, VehicleCategory.VAN, true, null, null, null))
                 .requiredDriverQualification(), "A road model that asks for no licence");
+        assertNull(types.create(driverTypeRequest(VehicleMobility.ROAD_RAIL, VehicleCategory.ROAD_RAIL_TRAILER, false,
+                RailGearType.RAIL_WHEEL_DRIVE, null, null)).requiredDriverQualification(), "A road-rail trailer is towed, not driven");
+        assertNull(types.create(driverTypeRequest(VehicleMobility.ROAD_ONLY, VehicleCategory.LOW_LOADER, false, null,
+                DrivingLicence.C_E, null)).requiredDriverQualification(), "Nor is a low loader, whatever licence towing it takes");
 
         QualificationTypeResponse mewp = qualificationType(QualificationKind.VEHICLE_OPERATION, null, null);
         VehicleTypeResponse platform = types.create(driverTypeRequest(VehicleMobility.ROAD_RAIL, VehicleCategory.ROAD_RAIL_MEWP, true,
@@ -567,6 +571,39 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         assertEquals(vehicle.id().toString(), cleared.entityId());
         assertTrue(((Map<?, ?>) cleared.values().get("type")).containsKey("requiredDriverQualification"));
         assertNull(((Map<?, ?>) cleared.values().get("type")).get("requiredDriverQualification"));
+    }
+
+    @Test
+    void v10EmptiesTheDriverQualificationTheDefaultGaveToWhatDoesNotMoveItself() throws Exception {
+        QualificationTypeResponse mewp = qualificationType(QualificationKind.VEHICLE_OPERATION, null, null);
+        // Lo que V8 o el alta de antes ponian: un remolque bivial con RR-OPERATOR y uno de carretera con su permiso.
+        VehicleTypeResponse trailer = types.create(driverTypeRequest(VehicleMobility.ROAD_RAIL, VehicleCategory.ROAD_RAIL_TRAILER, false,
+                RailGearType.RAIL_WHEEL_DRIVE, null, RR_OPERATOR));
+        VehicleTypeResponse lowLoader = types.create(driverTypeRequest(VehicleMobility.ROAD_ONLY, VehicleCategory.LOW_LOADER, false, null,
+                DrivingLicence.C_E, LICENCE_CE));
+        // Lo que se queda: otra elegida a mano, y lo que se mueve solo.
+        VehicleTypeResponse chosen = types.create(driverTypeRequest(VehicleMobility.ROAD_RAIL, VehicleCategory.ROAD_RAIL_TRAILER, false,
+                RailGearType.RAIL_WHEEL_DRIVE, null, mewp.id()));
+        VehicleTypeResponse truck = types.create(driverTypeRequest(VehicleMobility.ROAD_RAIL, VehicleCategory.ROAD_RAIL_TRUCK, true,
+                RailGearType.RAIL_WHEEL_DRIVE, null, null));
+        String v10 = new org.springframework.core.io.ClassPathResource("db/migration/V10__no_driver_for_what_does_not_move_itself.sql")
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        jdbc.execute(v10);
+
+        assertEquals(java.util.Arrays.asList(null, trailer.version() + 1), driverAndVersion(trailer.id()));
+        assertEquals(java.util.Arrays.asList(null, lowLoader.version() + 1), driverAndVersion(lowLoader.id()));
+        assertEquals(List.of(mewp.id(), chosen.version()), driverAndVersion(chosen.id()), "Another one chosen by hand stays");
+        assertEquals(List.of(RR_OPERATOR, truck.version()), driverAndVersion(truck.id()), "What moves itself keeps its driver");
+
+        jdbc.execute(v10);
+
+        assertEquals(java.util.Arrays.asList(null, trailer.version() + 1), driverAndVersion(trailer.id()), "Twice changes nothing");
+    }
+
+    private List<Object> driverAndVersion(UUID typeId) {
+        return jdbc.queryForObject("select required_driver_qualification_type_id, version from vehicle_type where id = ?",
+                (row, number) -> java.util.Arrays.asList(row.getObject(1, UUID.class), row.getLong(2)), typeId);
     }
 
     @Test
