@@ -32,8 +32,8 @@ and locations), `recursos.responsable` (and deactivating), and one per position 
 `mto-platform/keycloak/mto-positions-cross-service.json`: `equipo.operario` (worker), `equipo.jefe`
 (team leader), `equipo.supervisor` (supervisor), `equipo.jefe-supervisores` (chief supervisor),
 `mantenimiento.jefe` (chief of maintenance) and `proyecto.jefe` (project manager). The worker and the
-team leader are in the `EQ-NORTE` group of `mto-field`, so they can join that team's shifts there. See
-[`keycloak/README.md`](keycloak/README.md).
+team leader are in the group `A` of `mto-field` (named after the team `A` of `mto-maintenance`), so they
+can join that team's shifts there. See [`keycloak/README.md`](keycloak/README.md).
 
 To load a new consumer (or after `mto-maintenance` declared its queue the first time, or after a migration
 that adds keys to the events, like `V8`), republish people, teams, vehicles and instruments:
