@@ -7,6 +7,7 @@ import com.alejandro.mtoresources.application.exception.DuplicateCodeException;
 import com.alejandro.mtoresources.application.exception.FleetRuleException;
 import com.alejandro.mtoresources.application.exception.NotFoundException;
 import com.alejandro.mtoresources.application.exception.OrganizationRuleException;
+import com.alejandro.mtoresources.application.exception.QualificationRuleException;
 import com.alejandro.mtoresources.application.exception.TooManyOperationsException;
 import com.alejandro.mtoresources.application.exception.StaleVersionException;
 import com.alejandro.mtoresources.application.exception.ValidationException;
@@ -67,11 +68,11 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Regla de organizacion o de flota incumplida: el recurso existe pero su estado no admite la
-     * operacion (un equipo que se quedaria sin su jefe o con menos de 2 linemen, una dresina por
-     * carretera...).
+     * Regla de organizacion, de flota o de cualificaciones incumplida: el recurso existe pero su estado
+     * no admite la operacion (un equipo que se quedaria sin su jefe o con menos de 2 linemen, una
+     * dresina por carretera, una segunda cualificacion del mismo tipo...).
      */
-    @ExceptionHandler({OrganizationRuleException.class, FleetRuleException.class})
+    @ExceptionHandler({OrganizationRuleException.class, FleetRuleException.class, QualificationRuleException.class})
     public ResponseEntity<ApiErrorResponse> handleStateConflict(BusinessException exception, HttpServletRequest request) {
         return businessResponse(exception, HttpStatus.CONFLICT, request);
     }

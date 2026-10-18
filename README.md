@@ -3,7 +3,9 @@
 Spring Boot 4 / Java 25 REST API for the **people, the organization and the fleet** of the MTO domain
 (railway catenary): who works, who leads whom (project → department → chief supervision → supervision
 → team, a team being one team leader and 2 to 6 linemen in one vehicle), and the rail, road-rail and
-road vehicles with their characteristics and where each one is.
+road vehicles with their characteristics and where each one is; and until when: the qualifications of
+every person, the documents of every vehicle and the calibration of every instrument, with a daily warning
+of what expires.
 
 It is shared by [`mto-maintenance`](https://github.com/alexwarrior1991/mto-maintenance) (and
 tomorrow `mto-construction`), published through
@@ -33,10 +35,21 @@ and locations), `recursos.responsable` (and deactivating), and one per position 
 team leader are in the `EQ-NORTE` group of `mto-field`, so they can join that team's shifts there. See
 [`keycloak/README.md`](keycloak/README.md).
 
-To load a new consumer (or after `mto-maintenance` declared its queue the first time):
+To load a new consumer (or after `mto-maintenance` declared its queue the first time, or after a migration
+that adds keys to the events, like `V8`), republish people, teams, vehicles and instruments:
 
 ```bash
 curl -X POST -H "Authorization: Bearer $OPS_TOKEN" http://localhost:8089/actuator/republish
+```
+
+The other way round, the track access points of `mto-configuration` (what a road-rail vehicle on-tracks at,
+`GET /api/v1/resources/track-access-points`) arrive by its master-data channel on this service's own queue
+`mto.resources.master-data.queue`. What was published before that queue existed (the first deployment of
+`V9`) is loaded by republishing them there:
+
+```bash
+curl -X POST -H "Authorization: Bearer $CONFIG_TOKEN" \
+  "http://localhost:8081/api/v1/configuration/master-data/republish?entity=track-access-point"
 ```
 
 ## Configuration

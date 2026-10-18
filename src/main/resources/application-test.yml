@@ -34,9 +34,17 @@ app:
     enabled: ${APP_RABBITMQ_ENABLED:false}
     maintenance:
       listener-enabled: ${APP_RABBITMQ_MAINTENANCE_LISTENER_ENABLED:false}
+    field:
+      listener-enabled: ${APP_RABBITMQ_FIELD_LISTENER_ENABLED:false}
+    master-data:
+      listener-enabled: ${APP_RABBITMQ_MASTER_DATA_LISTENER_ENABLED:false}
   # El latido, el abandono y la purga de las operaciones de fondo los llaman los tests a mano.
   operations:
     scheduling-enabled: false
+  # El vigilante de caducidades tambien: BusinessLayerTest llama a ExpiryWatchService.check().
+  resources:
+    expiry:
+      enabled: false
 
 management:
   endpoint:

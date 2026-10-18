@@ -3,11 +3,17 @@ package com.alejandro.mtoresources.application.service.impl;
 import com.alejandro.mtoresources.application.dto.operation.RepublishResult;
 import com.alejandro.mtoresources.application.service.DomainEventPublisher;
 import com.alejandro.mtoresources.application.service.RepublishService;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.Instrument;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnit;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Person;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonQualification;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Vehicle;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleDocument;
+import com.alejandro.mtoresources.infrastructure.persistence.repository.InstrumentRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.OrganizationUnitRepository;
+import com.alejandro.mtoresources.infrastructure.persistence.repository.PersonQualificationRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.PersonRepository;
+import com.alejandro.mtoresources.infrastructure.persistence.repository.VehicleDocumentRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.VehicleRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,9 +27,11 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Republica en lotes de {@value #BATCH} filas, cada lote en su transaccion y con sus filas bloqueadas
@@ -37,18 +45,25 @@ class RepublishServiceImpl implements RepublishService {
     static final int BATCH = 200;
 
     private final PersonRepository personRepository;
+    private final PersonQualificationRepository qualificationRepository;
     private final OrganizationUnitRepository unitRepository;
     private final VehicleRepository vehicleRepository;
+    private final VehicleDocumentRepository documentRepository;
+    private final InstrumentRepository instrumentRepository;
     private final OrganizationLookups lookups;
     private final DomainEventPublisher events;
     private final TransactionTemplate transactions;
 
-    RepublishServiceImpl(PersonRepository personRepository, OrganizationUnitRepository unitRepository,
-                         VehicleRepository vehicleRepository, OrganizationLookups lookups, DomainEventPublisher events,
-                         PlatformTransactionManager transactionManager) {
+    RepublishServiceImpl(PersonRepository personRepository, PersonQualificationRepository qualificationRepository,
+                         OrganizationUnitRepository unitRepository, VehicleRepository vehicleRepository,
+                         VehicleDocumentRepository documentRepository, InstrumentRepository instrumentRepository,
+                         OrganizationLookups lookups, DomainEventPublisher events, PlatformTransactionManager transactionManager) {
         this.personRepository = personRepository;
+        this.qualificationRepository = qualificationRepository;
         this.unitRepository = unitRepository;
         this.vehicleRepository = vehicleRepository;
+        this.documentRepository = documentRepository;
+        this.instrumentRepository = instrumentRepository;
         this.lookups = lookups;
         this.events = events;
         this.transactions = new TransactionTemplate(transactionManager);
@@ -57,8 +72,8 @@ class RepublishServiceImpl implements RepublishService {
     @Override
     public RepublishResult republish(Long executionPackageId) {
         RepublishResult result = executionPackageId == null ? everything() : ofExecutionPackage(executionPackageId);
-        LOGGER.info("Republished {} people, {} teams and {} vehicles{}", result.people(), result.teams(), result.vehicles(),
-                executionPackageId == null ? "" : " of execution package " + executionPackageId);
+        LOGGER.info("Republished {} people, {} teams, {} vehicles and {} instruments{}", result.people(), result.teams(), result.vehicles(),
+                result.instruments(), executionPackageId == null ? "" : " of execution package " + executionPackageId);
         return result;
     }
 
@@ -66,7 +81,8 @@ class RepublishServiceImpl implements RepublishService {
         int people = pages(personRepository::findAllIds, this::people);
         int teams = pages(unitRepository::findTeamIds, this::teams);
         int vehicles = pages(vehicleRepository::findAllIds, this::vehicles);
-        return new RepublishResult(null, people, teams, vehicles);
+        int instruments = pages(instrumentRepository::findAllIds, this::instruments);
+        return new RepublishResult(null, people, teams, vehicles, instruments);
     }
 
     private RepublishResult ofExecutionPackage(Long executionPackageId) {
@@ -88,13 +104,17 @@ class RepublishServiceImpl implements RepublishService {
         int people = batches(new ArrayList<>(personIds), this::people);
         int teams = batches(teamIds, this::teams);
         int vehicles = batches(new ArrayList<>(vehicleIds), this::vehicles);
-        return new RepublishResult(executionPackageId, people, teams, vehicles);
+        // Un instrumento no es de ningun EP: sale al republicarlo todo.
+        return new RepublishResult(executionPackageId, people, teams, vehicles, 0);
     }
 
     private int people(Collection<UUID> ids) {
         Integer published = transactions.execute(status -> {
             List<Person> people = personRepository.lockAllInIdOrder(ids);
-            people.forEach(person -> events.publish(ResourcesEvents.person(person, eventName(person.getActive()))));
+            Map<UUID, List<PersonQualification>> qualifications = qualificationRepository.findAllOfPeople(ids).stream()
+                    .collect(Collectors.groupingBy(qualification -> qualification.getPerson().getId()));
+            people.forEach(person -> events.publish(ResourcesEvents.person(person,
+                    qualifications.getOrDefault(person.getId(), List.of()), eventName(person.getActive()), true)));
             return people.size();
         });
         return published == null ? 0 : published;
@@ -103,8 +123,8 @@ class RepublishServiceImpl implements RepublishService {
     private int teams(Collection<UUID> ids) {
         Integer published = transactions.execute(status -> {
             List<OrganizationUnit> teams = lookups.lockTeams(ids);
-            lookups.publishTeams(teams.stream().filter(team -> Boolean.TRUE.equals(team.getActive())).toList(), ResourcesEvents.UPDATED);
-            lookups.publishTeams(teams.stream().filter(team -> !Boolean.TRUE.equals(team.getActive())).toList(), ResourcesEvents.DEACTIVATED);
+            lookups.republishTeams(teams.stream().filter(team -> Boolean.TRUE.equals(team.getActive())).toList(), ResourcesEvents.UPDATED);
+            lookups.republishTeams(teams.stream().filter(team -> !Boolean.TRUE.equals(team.getActive())).toList(), ResourcesEvents.DEACTIVATED);
             return teams.size();
         });
         return published == null ? 0 : published;
@@ -113,8 +133,20 @@ class RepublishServiceImpl implements RepublishService {
     private int vehicles(Collection<UUID> ids) {
         Integer published = transactions.execute(status -> {
             List<Vehicle> vehicles = vehicleRepository.lockAllInIdOrder(ids);
-            vehicles.forEach(vehicle -> events.publish(ResourcesEvents.vehicle(vehicle, eventName(vehicle.getActive()))));
+            Map<UUID, List<VehicleDocument>> documents = documentRepository.findAllByVehicleIds(ids).stream()
+                    .collect(Collectors.groupingBy(document -> document.getVehicle().getId()));
+            vehicles.forEach(vehicle -> events.publish(ResourcesEvents.vehicle(vehicle, documents.getOrDefault(vehicle.getId(), List.of()),
+                    eventName(vehicle.getActive()), false, true)));
             return vehicles.size();
+        });
+        return published == null ? 0 : published;
+    }
+
+    private int instruments(Collection<UUID> ids) {
+        Integer published = transactions.execute(status -> {
+            List<Instrument> instruments = instrumentRepository.lockAllInIdOrder(ids);
+            instruments.forEach(instrument -> events.publish(ResourcesEvents.instrument(instrument, eventName(instrument.getActive()), true)));
+            return instruments.size();
         });
         return published == null ? 0 : published;
     }

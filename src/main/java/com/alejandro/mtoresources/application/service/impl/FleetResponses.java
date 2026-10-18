@@ -5,6 +5,7 @@ import com.alejandro.mtoresources.application.dto.fleet.VehicleResponse;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleSummary;
 import com.alejandro.mtoresources.application.mapper.AuditableMapper;
 import com.alejandro.mtoresources.application.mapper.ParkingSiteMapper;
+import com.alejandro.mtoresources.application.mapper.TrackAccessPointMapper;
 import com.alejandro.mtoresources.application.mapper.VehicleTypeMapper;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Vehicle;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleLocationEvent;
@@ -14,7 +15,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * Las respuestas de la flota que se montan a mano: la de un vehiculo lleva su posicion, que no es un
- * campo suyo, y la de una ubicacion nombra su sitio y su portador.
+ * campo suyo, y la de una ubicacion nombra su sitio, su punto de acceso y su portador. El historico, la
+ * posicion de un vehiculo y el tablero salen todos de {@link #location}.
  */
 @Component
 @RequiredArgsConstructor
@@ -22,6 +24,7 @@ class FleetResponses {
 
     private final VehicleTypeMapper typeMapper;
     private final ParkingSiteMapper siteMapper;
+    private final TrackAccessPointMapper accessPointMapper;
     private final AuditableMapper auditableMapper;
 
     static VehicleSummary summary(Vehicle vehicle) {
@@ -71,6 +74,7 @@ class FleetResponses {
                 event.getLatitude(),
                 event.getLongitude(),
                 event.getAccessPoint(),
+                event.getTrackAccessPoint() == null ? null : accessPointMapper.toSummary(event.getTrackAccessPoint()),
                 event.getDescription(),
                 summary(event.getCarrier()),
                 event.getAttachment(),

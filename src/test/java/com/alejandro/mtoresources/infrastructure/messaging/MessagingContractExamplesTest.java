@@ -8,14 +8,22 @@ import com.alejandro.mtoresources.infrastructure.messaging.outbox.AsynchronousMe
 import com.alejandro.mtoresources.infrastructure.messaging.outbox.AsynchronousMessageHashService;
 import com.alejandro.mtoresources.infrastructure.messaging.outbox.MessageContextResolver;
 import com.alejandro.mtoresources.infrastructure.messaging.rabbitmq.ResourcesRabbitMqNames;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.DrivingLicence;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.Instrument;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.InstrumentKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnit;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnitKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Person;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonCategory;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonQualification;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.QualificationKind;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.QualificationType;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.RailGearType;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Vehicle;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCapability;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCategory;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleDocument;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleDocumentKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleMobility;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleOperationalStatus;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleType;
@@ -32,6 +40,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.LinkedHashSet;
@@ -61,6 +70,9 @@ class MessagingContractExamplesTest {
 
     private static final Instant CREATION_DATE = Instant.parse("2026-10-16T09:00:00Z");
 
+    /** El dia del vigilante en los ejemplos de caducidad: el de {@link #CREATION_DATE}. */
+    private static final LocalDate TODAY = LocalDate.parse("2026-10-16");
+
     private static final MessageActor MANAGER = MessageActor.of("6f1b1c8e-0000-4000-8000-000000000051", "recursos.gestor");
     private static final String REQUEST_CORRELATION_ID = "8c3b8c1a-1111-4222-8333-555555555555";
 
@@ -71,8 +83,9 @@ class MessagingContractExamplesTest {
 
     @Test
     void personCreated() throws IOException {
+        // Una persona nueva aun no tiene cualificaciones: se le dan despues.
         check("person-created.json", "b0000000-0000-4000-8000-000000000001", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.person(leader(), ResourcesEvents.CREATED));
+                ResourcesEvents.person(leader(), List.of(), ResourcesEvents.CREATED));
     }
 
     @Test
@@ -80,8 +93,12 @@ class MessagingContractExamplesTest {
         Person person = leader();
         person.setCategory(PersonCategory.SUPERVISOR);
         ReflectionTestUtils.setField(person, "version", 1L);
+        // Llegan en cualquier orden y viajan por codigo; todas, tambien las caducadas.
+        List<PersonQualification> qualifications = List.of(
+                qualification(person, railDriver(), "a1000000-0000-4000-8000-000000000001", LocalDate.parse("2027-03-31")),
+                qualification(person, licenceC(), "a1000000-0000-4000-8000-000000000002", LocalDate.parse("2031-06-14")));
         check("person-updated.json", "b0000000-0000-4000-8000-000000000002", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.person(person, ResourcesEvents.UPDATED));
+                ResourcesEvents.person(person, qualifications, ResourcesEvents.UPDATED));
     }
 
     @Test
@@ -89,8 +106,10 @@ class MessagingContractExamplesTest {
         Person person = lineman("c0000000-0000-4000-8000-000000000012", "PER-000012", "Avi", "Levi", null);
         person.setActive(false);
         ReflectionTestUtils.setField(person, "version", 2L);
+        // Una que no caduca viaja con expiresOn nulo.
         check("person-deactivated.json", "b0000000-0000-4000-8000-000000000003", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.person(person, ResourcesEvents.DEACTIVATED));
+                ResourcesEvents.person(person, List.of(qualification(person, licenceB(), "a1000000-0000-4000-8000-000000000003", null)),
+                        ResourcesEvents.DEACTIVATED));
     }
 
     // -------------------------------------------------------------------------------- teams
@@ -123,8 +142,9 @@ class MessagingContractExamplesTest {
 
     @Test
     void vehicleCreated() throws IOException {
+        // Un vehiculo nuevo aun no tiene documentos: se le dan despues.
         check("vehicle-created.json", "b0000000-0000-4000-8000-000000000007", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.vehicle(roadRail(), ResourcesEvents.CREATED));
+                ResourcesEvents.vehicle(roadRail(), List.of(), ResourcesEvents.CREATED));
     }
 
     @Test
@@ -133,8 +153,10 @@ class MessagingContractExamplesTest {
         vehicle.setOperationalStatus(VehicleOperationalStatus.UNDER_REPAIR);
         vehicle.setStatusReason("Hydraulic leak on the crane");
         ReflectionTestUtils.setField(vehicle, "version", 1L);
+        // Pasa a reparacion: deja de estar disponible, y eso es lo que avisa mto-notification. Sus documentos
+        // llegan en cualquier orden y viajan por tipo.
         check("vehicle-updated.json", "b0000000-0000-4000-8000-000000000008", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.vehicle(vehicle, ResourcesEvents.UPDATED));
+                ResourcesEvents.vehicle(vehicle, documents(vehicle), ResourcesEvents.UPDATED, true, false));
     }
 
     @Test
@@ -143,10 +165,113 @@ class MessagingContractExamplesTest {
         vehicle.setActive(false);
         ReflectionTestUtils.setField(vehicle, "version", 2L);
         check("vehicle-deactivated.json", "b0000000-0000-4000-8000-000000000009", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.vehicle(vehicle, ResourcesEvents.DEACTIVATED));
+                ResourcesEvents.vehicle(vehicle, documents(vehicle), ResourcesEvents.DEACTIVATED, true, false));
+    }
+
+    // -------------------------------------------------------------------------- instruments
+
+    @Test
+    void instrumentCreated() throws IOException {
+        check("instrument-created.json", "b0000000-0000-4000-8000-000000000010", MANAGER, REQUEST_CORRELATION_ID,
+                ResourcesEvents.instrument(earthingPole(), ResourcesEvents.CREATED));
+    }
+
+    @Test
+    void instrumentUpdated() throws IOException {
+        Instrument instrument = earthingPole();
+        instrument.setCalibratedOn(LocalDate.parse("2027-03-25"));
+        instrument.setCalibrationExpiresOn(LocalDate.parse("2028-03-24"));
+        ReflectionTestUtils.setField(instrument, "version", 1L);
+        // Recalibrada: sus fechas nuevas.
+        check("instrument-updated.json", "b0000000-0000-4000-8000-000000000011", MANAGER, REQUEST_CORRELATION_ID,
+                ResourcesEvents.instrument(instrument, ResourcesEvents.UPDATED));
+    }
+
+    @Test
+    void instrumentDeactivated() throws IOException {
+        Instrument instrument = earthingPole();
+        instrument.setActive(false);
+        ReflectionTestUtils.setField(instrument, "version", 2L);
+        check("instrument-deactivated.json", "b0000000-0000-4000-8000-000000000012", MANAGER, REQUEST_CORRELATION_ID,
+                ResourcesEvents.instrument(instrument, ResourcesEvents.DEACTIVATED));
+    }
+
+    // --------------------------------------------------------------------------- expiries
+
+    @Test
+    void qualificationExpiring() throws IOException {
+        // Un lineman del equipo A: su jefe tambien se entera.
+        Person person = lineman("c0000000-0000-4000-8000-000000000010", "PER-000010", "Eli", "Katz", "equipo.operario");
+        PersonQualification qualification = qualification(person, railDriver(), "a1000000-0000-4000-8000-000000000010",
+                LocalDate.parse("2026-11-15"));
+        checkExpiry("qualification-expiring.json", ResourcesEvents.qualificationExpiry(qualification, ResourcesEvents.EXPIRING, TODAY, "A",
+                leader()), qualification.getExpiresOn());
+    }
+
+    @Test
+    void qualificationExpired() throws IOException {
+        // El jefe del equipo A: su aviso no lleva jefe, porque el jefe es el.
+        Person person = leader();
+        PersonQualification qualification = qualification(person, licenceC(), "a1000000-0000-4000-8000-000000000011",
+                LocalDate.parse("2026-10-15"));
+        checkExpiry("qualification-expired.json", ResourcesEvents.qualificationExpiry(qualification, ResourcesEvents.EXPIRED, TODAY, "A",
+                null), qualification.getExpiresOn());
+    }
+
+    @Test
+    void vehicleDocumentExpiring() throws IOException {
+        VehicleDocument inspection = VehicleDocument.builder().vehicle(roadRail()).kind(VehicleDocumentKind.ROAD_INSPECTION)
+                .reference("ITV-2026-118").expiresOn(LocalDate.parse("2026-11-01")).build();
+        entity(inspection, "a2000000-0000-4000-8000-000000000002");
+        checkExpiry("vehicle-document-expiring.json", ResourcesEvents.vehicleDocumentExpiry(inspection, ResourcesEvents.EXPIRING, TODAY),
+                inspection.getExpiresOn());
+    }
+
+    @Test
+    void vehicleDocumentExpired() throws IOException {
+        VehicleDocument insurance = VehicleDocument.builder().vehicle(roadRail()).kind(VehicleDocumentKind.INSURANCE)
+                .reference("POL-55120").expiresOn(LocalDate.parse("2026-10-14")).build();
+        entity(insurance, "a2000000-0000-4000-8000-000000000001");
+        checkExpiry("vehicle-document-expired.json", ResourcesEvents.vehicleDocumentExpiry(insurance, ResourcesEvents.EXPIRED, TODAY),
+                insurance.getExpiresOn());
+    }
+
+    @Test
+    void calibrationExpiring() throws IOException {
+        Instrument instrument = earthingPole();
+        instrument.setCalibratedOn(LocalDate.parse("2025-10-31"));
+        instrument.setCalibrationExpiresOn(LocalDate.parse("2026-10-30"));
+        checkExpiry("calibration-expiring.json", ResourcesEvents.calibrationExpiry(instrument, ResourcesEvents.EXPIRING, TODAY),
+                instrument.getCalibrationExpiresOn());
+    }
+
+    @Test
+    void calibrationExpired() throws IOException {
+        Instrument instrument = Instrument.builder().code("DT-03").name("Voltage detector 25 kV").kind(InstrumentKind.VOLTAGE_DETECTOR)
+                .serialNumber("VD-7731").calibratedOn(LocalDate.parse("2025-10-13")).calibrationExpiresOn(LocalDate.parse("2026-10-12"))
+                .build();
+        entity(instrument, "a3000000-0000-4000-8000-000000000003");
+        checkExpiry("calibration-expired.json", ResourcesEvents.calibrationExpiry(instrument, ResourcesEvents.EXPIRED, TODAY),
+                instrument.getCalibrationExpiresOn());
+    }
+
+    /**
+     * Un aviso de caducidad lo publica el vigilante diario: sin token ({@code SYSTEM}), sin correlacion, y con
+     * el {@code operationId} derivado de lo que cuenta.
+     */
+    private void checkExpiry(String fileName, DomainEvent event, LocalDate expiresOn) throws IOException {
+        check(fileName, ResourcesEvents.expiryOperationId(event, expiresOn).toString(), MessageActor.system(), null, event);
     }
 
     // ----------------------------------------------------------------------------- fixtures
+
+    private static Instrument earthingPole() {
+        Instrument instrument = Instrument.builder().code("PT-012").name("Earthing pole 25 kV").kind(InstrumentKind.EARTHING_POLE)
+                .serialNumber("EP25-88412").calibratedOn(LocalDate.parse("2026-04-01")).calibrationExpiresOn(LocalDate.parse("2027-03-31"))
+                .build();
+        entity(instrument, "a3000000-0000-4000-8000-000000000012");
+        return instrument;
+    }
 
     private static Person leader() {
         Person person = Person.builder().code("PER-000003").firstName("Yossi").lastName("Cohen").username("equipo.jefe")
@@ -188,11 +313,56 @@ class MessagingContractExamplesTest {
     private static Vehicle roadRail() {
         VehicleType type = VehicleType.builder().code("UNIMOG-RR").name("Unimog road-rail").mobility(VehicleMobility.ROAD_RAIL)
                 .category(VehicleCategory.ROAD_RAIL_TRUCK).seats(7).railGearType(RailGearType.RAIL_WHEEL_DRIVE)
-                .capabilities(EnumSet.of(VehicleCapability.TOWING, VehicleCapability.CRANE, VehicleCapability.CREW_CABIN)).build();
+                .capabilities(EnumSet.of(VehicleCapability.TOWING, VehicleCapability.CRANE, VehicleCapability.CREW_CABIN))
+                .requiredDriverQualification(roadRailOperator()).build();
         entity(type, "e0000000-0000-4000-8000-000000000001");
         Vehicle vehicle = Vehicle.builder().code("RR-07").name("Unimog 7").type(type).registrationPlate("12-345-67").build();
         entity(vehicle, "f0000000-0000-4000-8000-000000000007");
         return vehicle;
+    }
+
+    private static List<VehicleDocument> documents(Vehicle vehicle) {
+        VehicleDocument insurance = VehicleDocument.builder().vehicle(vehicle).kind(VehicleDocumentKind.INSURANCE).reference("POL-55120")
+                .expiresOn(LocalDate.parse("2026-12-31")).build();
+        entity(insurance, "a2000000-0000-4000-8000-000000000001");
+        VehicleDocument inspection = VehicleDocument.builder().vehicle(vehicle).kind(VehicleDocumentKind.ROAD_INSPECTION)
+                .reference("ITV-2026-118").expiresOn(LocalDate.parse("2027-02-28")).build();
+        entity(inspection, "a2000000-0000-4000-8000-000000000002");
+        return List.of(inspection, insurance);
+    }
+
+    private static QualificationType roadRailOperator() {
+        QualificationType type = QualificationType.builder().code("RR-OPERATOR").name("Road-rail machine operator")
+                .kind(QualificationKind.VEHICLE_OPERATION).build();
+        entity(type, "0195b000-0000-7000-8000-000000000105");
+        return type;
+    }
+
+    private static QualificationType railDriver() {
+        QualificationType type = QualificationType.builder().code("RAIL-DRIVER").name("Rail auxiliary vehicle driver")
+                .kind(QualificationKind.VEHICLE_OPERATION).build();
+        entity(type, "0195b000-0000-7000-8000-000000000104");
+        return type;
+    }
+
+    private static QualificationType licenceC() {
+        QualificationType type = QualificationType.builder().code("LIC-C").name("Driving licence C").kind(QualificationKind.DRIVING_LICENCE)
+                .drivingLicence(DrivingLicence.C).build();
+        entity(type, "0195b000-0000-7000-8000-000000000102");
+        return type;
+    }
+
+    private static QualificationType licenceB() {
+        QualificationType type = QualificationType.builder().code("LIC-B").name("Driving licence B").kind(QualificationKind.DRIVING_LICENCE)
+                .drivingLicence(DrivingLicence.B).build();
+        entity(type, "0195b000-0000-7000-8000-000000000101");
+        return type;
+    }
+
+    private static PersonQualification qualification(Person person, QualificationType type, String id, LocalDate expiresOn) {
+        PersonQualification qualification = PersonQualification.builder().person(person).qualificationType(type).expiresOn(expiresOn).build();
+        entity(qualification, id);
+        return qualification;
     }
 
     private static void entity(Object entity, String id) {

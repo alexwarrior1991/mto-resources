@@ -130,8 +130,11 @@ public class VehicleController {
     @Operation(summary = "Record where a vehicle is", description = "Append-only; resources-location-write is enough. Where it can be depends "
             + "on its mobility: a rail-only vehicle is never ON_ROAD and is PARKED on a track (a track and kp, or a site with rail access); "
             + "a road-only one is never ON_TRACK and is PARKED off it; a road-rail one may be on both. ATTACHED needs its carrier and "
-            + "how (TOWED by one with TOWING, CARRIED by a road vehicle, or anything portable). observedAt in the past is kept in the "
-            + "history and moves the position only if it is newer than the current one. 409 VEH-001 when a rule says no.")
+            + "how (TOWED by one with TOWING, CARRIED by a road vehicle, or anything portable). accessPointId (GET /track-access-points) "
+            + "says where it on-tracked or off-tracked: the access point is enabled, on the track of the location, admits road-rail "
+            + "vehicles if it is one, is a PREPARED_ACCESS if the model needs one and takes its weight (409 VEH-001 otherwise; "
+            + "404 TAP-404 if unknown). observedAt in the past is kept in the history and moves the position only if it is newer "
+            + "than the current one. 409 VEH-001 when a rule says no.")
     @PostMapping("/{id}/locations")
     public ResponseEntity<VehicleLocationResponse> recordLocation(@PathVariable UUID id, @Valid @RequestBody VehicleLocationRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(locationService.recordManual(id, request));

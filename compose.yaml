@@ -33,10 +33,16 @@ services:
       APP_RABBITMQ_ENABLED: ${APP_RABBITMQ_ENABLED:-true}
       # The shifts of mto-maintenance, which move the vehicles (docs/06-messaging.md).
       APP_RABBITMQ_MAINTENANCE_LISTENER_ENABLED: ${APP_RABBITMQ_MAINTENANCE_LISTENER_ENABLED:-true}
+      # The track access points of mto-configuration, which the fleet rules check when a location says one.
+      APP_RABBITMQ_MASTER_DATA_LISTENER_ENABLED: ${APP_RABBITMQ_MASTER_DATA_LISTENER_ENABLED:-true}
       SPRING_RABBITMQ_LISTENER_OBSERVATION_ENABLED: ${SPRING_RABBITMQ_LISTENER_OBSERVATION_ENABLED:-true}
-      # Own events (people, teams, vehicles), published from the outbox.
+      # Own events (people, teams, vehicles, instruments, expiry warnings), published from the outbox.
       APP_RABBITMQ_EVENTS_EXCHANGE: ${APP_RABBITMQ_EVENTS_EXCHANGE:-mto.resources.exchange}
       APP_OUTBOX_ENABLED: ${APP_OUTBOX_ENABLED:-true}
+      # The daily expiry watcher (cron in UTC).
+      APP_RESOURCES_EXPIRY_ENABLED: ${APP_RESOURCES_EXPIRY_ENABLED:-true}
+      APP_RESOURCES_EXPIRY_CRON: ${APP_RESOURCES_EXPIRY_CRON:-0 10 4 * * *}
+      APP_RESOURCES_EXPIRY_WARNING_DAYS: ${APP_RESOURCES_EXPIRY_WARNING_DAYS:-30}
       MESSAGING_SIGNATURE_SECRET: ${MESSAGING_SIGNATURE_SECRET:-}
       MESSAGING_SIGNATURE_MODE: ${MESSAGING_SIGNATURE_MODE:-OPTIONAL}
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-http://otel.mto.local:4318/v1/traces}

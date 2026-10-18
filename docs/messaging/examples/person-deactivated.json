@@ -19,10 +19,19 @@
       "employer": "OWN",
       "company": null,
       "active": false,
-      "version": 2
+      "version": 2,
+      "republished": false,
+      "qualifications": [
+        {
+          "code": "LIC-B",
+          "kind": "DRIVING_LICENCE",
+          "drivingLicence": "B",
+          "expiresOn": null
+        }
+      ]
     }
   },
-  "messageHash": "67c84e783dd7cb795105e3e242de5b43aca37d88c20bbeef45181ede93a5fe28",
+  "messageHash": "dd61c315afe74e749b4a846b03cfecc4c92196a35cf11a9163cb0a375301599f",
   "actor": {
     "id": "6f1b1c8e-0000-4000-8000-000000000051",
     "username": "recursos.gestor",

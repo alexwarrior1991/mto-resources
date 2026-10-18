@@ -11,7 +11,7 @@ import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Set;
 
-@Mapper(config = MapStructCentralConfig.class, uses = AuditableMapper.class)
+@Mapper(config = MapStructCentralConfig.class, uses = {AuditableMapper.class, QualificationTypeMapper.class})
 public interface VehicleTypeMapper {
 
     @Mapping(target = "audit", source = "type")

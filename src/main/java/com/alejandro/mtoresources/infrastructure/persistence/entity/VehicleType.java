@@ -9,6 +9,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.ForeignKey;
 import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -183,6 +184,15 @@ public class VehicleType extends VersionedEntity {
     @Column(name = "capability", nullable = false, columnDefinition = "vehicle_capability")
     @Builder.Default
     private Set<VehicleCapability> capabilities = EnumSet.noneOf(VehicleCapability.class);
+
+    /**
+     * La habilitacion que exige conducirlo ({@code RAIL-DRIVER}, {@code RR-OPERATOR}, {@code LIC-C}...); nula,
+     * ninguna. Quien decide si la dotacion de un turno la tiene es {@code mto-maintenance}.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "required_driver_qualification_type_id",
+            foreignKey = @ForeignKey(name = "fk_vehicle_type_required_driver_qualification"))
+    private QualificationType requiredDriverQualification;
 
     @Column(name = "notes", columnDefinition = "text")
     private String notes;

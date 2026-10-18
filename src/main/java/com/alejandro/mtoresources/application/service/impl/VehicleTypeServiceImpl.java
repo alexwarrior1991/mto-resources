@@ -7,6 +7,7 @@ import com.alejandro.mtoresources.application.dto.fleet.VehicleTypeResponse;
 import com.alejandro.mtoresources.application.dto.fleet.VehicleTypeUpdateRequest;
 import com.alejandro.mtoresources.application.exception.DuplicateCodeException;
 import com.alejandro.mtoresources.application.exception.NotFoundException;
+import com.alejandro.mtoresources.application.exception.QualificationRuleException;
 import com.alejandro.mtoresources.application.exception.StaleVersionException;
 import com.alejandro.mtoresources.application.exception.ValidationException;
 import com.alejandro.mtoresources.application.mapper.PageMapper;
@@ -14,11 +15,15 @@ import com.alejandro.mtoresources.application.mapper.VehicleTypeMapper;
 import com.alejandro.mtoresources.application.service.DomainEventPublisher;
 import com.alejandro.mtoresources.application.service.VehicleTypeService;
 import com.alejandro.mtoresources.domain.model.FleetRules;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.QualificationType;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Vehicle;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCapability;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCategory;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleDocument;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleMobility;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleType;
+import com.alejandro.mtoresources.infrastructure.persistence.repository.QualificationTypeRepository;
+import com.alejandro.mtoresources.infrastructure.persistence.repository.VehicleDocumentRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.VehicleRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.VehicleTypeRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.specification.SpecificationUtils;
@@ -31,8 +36,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -43,10 +50,12 @@ class VehicleTypeServiceImpl implements VehicleTypeService {
             "maxAxleLoadT", "axles", "seats", "payloadT", "power", "trackGaugeMm", "maxSpeedTrackWorkingKmh", "maxSpeedTrackTransportKmh",
             "maxGradientPermille", "minCurveRadiusM", "maxWorkingCantMm", "railGearType", "onTrackingMinutes", "needsPreparedAccess",
             "maxSpeedRoadKmh", "requiredLicence", "capabilities", "craneCapacityT", "craneReachM", "platformHeightM", "platformLoadKg",
-            "platformInsulationKv", "towingCapacityT", "notes");
+            "platformInsulationKv", "towingCapacityT", "notes", "requiredDriverQualificationTypeId");
 
     private final VehicleTypeRepository repository;
     private final VehicleRepository vehicleRepository;
+    private final VehicleDocumentRepository documentRepository;
+    private final QualificationTypeRepository qualificationTypeRepository;
     private final VehicleTypeMapper mapper;
     private final DomainEventPublisher events;
 
@@ -97,6 +106,9 @@ class VehicleTypeServiceImpl implements VehicleTypeService {
                 .towingCapacityT(request.towingCapacityT())
                 .notes(SpecificationUtils.normalize(request.notes()))
                 .build();
+        type.setRequiredDriverQualification(request.requiredDriverQualificationTypeId() != null
+                ? activeQualification(request.requiredDriverQualificationTypeId())
+                : defaultDriverQualification(type));
         requireConsistent(type);
         return mapper.toResponse(repository.save(type));
     }
@@ -159,13 +171,23 @@ class VehicleTypeServiceImpl implements VehicleTypeService {
         PatchRules.set(patch, "platformInsulationKv", values.platformInsulationKv(), type::setPlatformInsulationKv);
         PatchRules.set(patch, "towingCapacityT", values.towingCapacityT(), type::setTowingCapacityT);
         PatchRules.set(patch, "notes", SpecificationUtils.normalize(values.notes()), type::setNotes);
+        UUID driverId = values.requiredDriverQualificationTypeId();
+        QualificationType driver = type.getRequiredDriverQualification();
+        if (driverId != null && (driver == null || !driverId.equals(driver.getId()))) {
+            type.setRequiredDriverQualification(activeQualification(driverId));
+        } else if (patch.clears("requiredDriverQualificationTypeId")) {
+            type.setRequiredDriverQualification(null);
+        }
         PatchRules.set(patch, "active", values.active(), type::setActive);
         requireConsistent(type);
 
         VehicleType saved = repository.saveAndFlush(type);
+        Map<UUID, List<VehicleDocument>> documents = vehicles.isEmpty() ? Map.of()
+                : documentRepository.findAllByVehicleIds(vehicles.stream().map(Vehicle::getId).toList()).stream()
+                .collect(Collectors.groupingBy(document -> document.getVehicle().getId()));
         for (Vehicle vehicle : vehicles) {
-            events.publish(ResourcesEvents.vehicle(vehicle, Boolean.TRUE.equals(vehicle.getActive())
-                    ? ResourcesEvents.UPDATED : ResourcesEvents.DEACTIVATED));
+            events.publish(ResourcesEvents.vehicle(vehicle, documents.getOrDefault(vehicle.getId(), List.of()),
+                    Boolean.TRUE.equals(vehicle.getActive()) ? ResourcesEvents.UPDATED : ResourcesEvents.DEACTIVATED));
         }
         return mapper.toResponse(saved);
     }
@@ -192,6 +214,25 @@ class VehicleTypeServiceImpl implements VehicleTypeService {
 
     private VehicleType type(UUID id) {
         return repository.findById(id).orElseThrow(() -> new NotFoundException("Vehicle type", id));
+    }
+
+    /** La que se pide tiene que existir (404 QTY-404) y estar activa: de un tipo retirado no se dan nuevas. */
+    private QualificationType activeQualification(UUID id) {
+        QualificationType qualification = qualificationTypeRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Qualification type", id));
+        if (!Boolean.TRUE.equals(qualification.getActive())) {
+            throw new QualificationRuleException("Qualification type " + qualification.getCode() + " is retired: a model cannot ask for it");
+        }
+        return qualification;
+    }
+
+    /** La de su movilidad (FleetRules), si el catalogo la tiene activa; si no, ninguna. */
+    private QualificationType defaultDriverQualification(VehicleType type) {
+        return FleetRules.defaultDriverQualification(type.getMobility(), Boolean.TRUE.equals(type.getSelfPropelled()),
+                        type.getRequiredLicence())
+                .flatMap(qualificationTypeRepository::findByCode)
+                .filter(qualification -> Boolean.TRUE.equals(qualification.getActive()))
+                .orElse(null);
     }
 
     private static Set<VehicleCapability> capabilities(Set<VehicleCapability> requested) {

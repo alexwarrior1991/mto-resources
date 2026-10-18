@@ -12,6 +12,12 @@ public final class RabbitListenerContainerFactoryNames {
     /** Factory de la cola de los eventos de mto-maintenance (los turnos). */
     public static final String MAINTENANCE = "maintenanceRabbitListenerContainerFactory";
 
+    /** Factory de la cola de las posiciones de mto-field. */
+    public static final String FIELD = "fieldRabbitListenerContainerFactory";
+
+    /** Factory de la cola de los datos maestros de mto-configuration (los puntos de acceso a la via). */
+    public static final String MASTER_DATA = "masterDataRabbitListenerContainerFactory";
+
     private RabbitListenerContainerFactoryNames() {
     }
 }

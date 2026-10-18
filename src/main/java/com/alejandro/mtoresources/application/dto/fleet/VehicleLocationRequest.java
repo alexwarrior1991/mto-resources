@@ -19,14 +19,26 @@ import java.util.UUID;
  *
  * <ul>
  *   <li>{@code PARKED}: un sitio del catalogo, o una via y un kp, o una descripcion o unas coordenadas.</li>
- *   <li>{@code ON_TRACK}: su via (y su kp); en una bivial, {@code accessPoint} dice donde encarrilo.</li>
+ *   <li>{@code ON_TRACK}: su via (y su kp); en una bivial, {@code accessPointId} dice donde encarrilo, del
+ *       catalogo de {@code mto-configuration} ({@code GET /track-access-points}), o {@code accessPoint} con
+ *       texto libre.</li>
  *   <li>{@code ATTACHED}: {@code carrierVehicleId} y {@code attachment} ({@code TOWED} o {@code CARRIED}).</li>
  * </ul>
+ *
+ * <p>Con {@code accessPointId} se aplican las reglas del acceso ({@code FleetRules.accessPointViolation}, 409
+ * {@code VEH-001}): habilitado, en la via de la ubicacion si la dice, que admita biviales si lo es el
+ * vehiculo, preparado si el modelo lo exige y que aguante su peso. Un id que no esta en el catalogo es 404
+ * {@code TAP-404}. Nunca es obligatorio.</p>
  *
  * <p>Ejemplo, una bivial que desencarrila y se queda en un aparcamiento de carretera:</p>
  * <pre>{@code
  * {"kind": "PARKED", "description": "Car park next to level crossing LC-31", "latitude": 32.123456,
  *  "longitude": 34.876543, "accessPoint": "LC-31", "observedAt": "2026-10-16T03:40:00Z"}
+ * }</pre>
+ *
+ * <p>Y una que encarrila en un acceso del catalogo:</p>
+ * <pre>{@code
+ * {"kind": "ON_TRACK", "trackId": 3, "kp": 110176.000, "accessPointId": 77, "observedAt": "2026-10-16T23:10:00Z"}
  * }</pre>
  */
 public record VehicleLocationRequest(
@@ -38,6 +50,7 @@ public record VehicleLocationRequest(
         @DecimalMin("-90") @DecimalMax("90") @Digits(integer = 3, fraction = 6) BigDecimal latitude,
         @DecimalMin("-180") @DecimalMax("180") @Digits(integer = 3, fraction = 6) BigDecimal longitude,
         @Size(max = 150) String accessPoint,
+        Long accessPointId,
         @Size(max = 500) String description,
         UUID carrierVehicleId,
         VehicleAttachment attachment,

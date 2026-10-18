@@ -12,6 +12,27 @@ would drop below 2.
 Category ranks: `WORKER` 1, `TEAM_LEADER` 2, `SUPERVISOR` 3, `CHIEF_SUPERVISOR` 4, `CHIEF_MAINTENANCE`
 and `CHIEF_CONSTRUCTION` 5, `PROJECT_MANAGER` 6.
 
+## Qualifications
+
+What someone is qualified for, with its dates only (no diagnosis, no copy of any document): a driving
+licence, the qualification to drive a rail auxiliary vehicle or to operate a road-rail machine, work near
+live equipment, first aid, the medical fitness date. `QualificationType` is the catalogue: a code (upper
+case, never changes: it is what travels in the events), a name, a kind (`DRIVING_LICENCE`,
+`VEHICLE_OPERATION`, `SAFETY`, `OTHER`), the driving licence (`B`, `C`, `C_E`) if and only if it is a
+`DRIVING_LICENCE`, and an optional default validity in months. Seeded: `LIC-B`, `LIC-C`, `LIC-CE`,
+`RAIL-DRIVER` (rail auxiliary vehicle driver) and `RR-OPERATOR` (road-rail machine operator). A type is
+retired, never deleted: what people already have stays, but no new one is given (409 `QUA-001`).
+
+`PersonQualification` is one of a person, **one per type**: renewing it is changing its `expiresOn`. It
+has a reference (the number of the licence or certificate), `issuedOn`, `expiresOn` (none: it does not
+expire; never before `issuedOn`, 400 `VAL-001`) and notes. Without `expiresOn`, a new one takes
+`issuedOn` plus the validity of its type, if the type has one. One given by mistake is deleted (Envers
+keeps the deletion). An expiry date is the last day it is valid: it is **expired** from the next day
+(`ExpiryRules`, «today» in the clock of the service, UTC).
+
+Who decides that something expired does not enter a shift is `mto-maintenance`, with what the events
+say: every person event carries all their qualifications, the expired ones too.
+
 ## The organization tree
 
 `OrganizationUnit`: `PROJECT` (level 1) → `DEPARTMENT` (2) → `CHIEF_SUPERVISION` (3) → `SUPERVISION`
@@ -67,11 +88,59 @@ access; road: speed and driving licence (`B`, `C`, `C_E`); capabilities (`CRANE`
 `WIRE_DRUM`, `OCS_MEASURING`, `TRACK_MEASURING`, `EARTHING`, `TOWING`, `CREW_CABIN`, `WORKSHOP`) with
 their figures. `FleetRules.typeViolation` keeps a model coherent (400 otherwise).
 
+A model also says the qualification its driver needs (`requiredDriverQualification`, a
+`QualificationType`, or none). A model created without saying it takes the one of its mobility
+(`FleetRules.defaultDriverQualification`): a self-propelled rail-only one, `RAIL-DRIVER`; a road-rail one,
+`RR-OPERATOR`; a road-only one, the licence it asks for (`LIC-B`, `LIC-C`, `LIC-CE`), or none. `V8` filled
+the existing models with the same rule. It can be changed or emptied; a retired qualification type is
+not asked for (409 `QUA-001`). Who checks that the crew of a shift has a distinct driver with it for
+every self-propelled vehicle is `mto-maintenance`.
+
 `Vehicle` is the **unit**: fleet code, model, registration plate (required if it runs on the road,
 absent if rail-only), rail vehicle number (required if its model may run on open track, absent if
 road-only), serial, year, owner, operational status (`OPERATIONAL`, `LIMITED`, `UNDER_REPAIR`,
 `OUT_OF_SERVICE`, with a reason unless operational), odometer and engine hours. **Available** means
 active and `OPERATIONAL` or `LIMITED`. The default vehicle of an active team is not retired.
+
+A vehicle has its **documents** (`VehicleDocument`), **one per kind**: the road inspection, the rail
+inspection, the insurance, the crane and the platform certificates, other. Each has a reference,
+`issuedOn` and an `expiresOn` that is always there (a document always expires; never before the issue);
+renewing it is changing that date, and one given by mistake is deleted. An expired document does not
+change whether the vehicle is available: whether it enters a shift is for `mto-maintenance` to decide,
+with the documents every vehicle event carries.
+
+## Instruments
+
+`Instrument` is a calibrated instrument taken to the work site, a record of its own like a vehicle: an
+earthing pole (`EARTHING_POLE`), a voltage detector (`VOLTAGE_DETECTOR`), a measuring device
+(`MEASURING`) or `OTHER`. Code (upper case), name, serial number, `calibratedOn` and
+`calibrationExpiresOn` (none: no calibration that expires; never before `calibratedOn`), notes, `active`.
+It is retired, never deleted (the shifts name it); recalibrating it is changing its dates.
+`mto-maintenance` keeps a snapshot of every instrument (`instrument.*`) to pick them in a shift, and it is
+the one that refuses an inactive one or one whose calibration expired.
+
+## Expiries
+
+A qualification, a document and the calibration of an instrument are valid until their expiry date
+included, and **expired from the next day** (`ExpiryRules`, «today» in the clock of the service, UTC). Every
+day `ExpiryWatchService` (`app.resources.expiry.*`: `enabled`, `cron`, `warning-days` 30) warns about them,
+for active people, active vehicles and active instruments only:
+
+| Event | When |
+|---|---|
+| `qualification.expiring`, `vehicle-document.expiring`, `calibration.expiring` | `warning-days` days or fewer to its expiry date, and still valid (the expiry date itself too, `daysLeft: 0`) |
+| `qualification.expired`, `vehicle-document.expired`, `calibration.expired` | From the day after its expiry date (`daysLeft` negative) |
+
+**Once per expiry date**: the warning is decided by a conditional mark on the row
+(`expiring_notified_for`, `expired_notified_for`, written with the condition inside the statement, one row
+→ publish, in the same transaction), so a second pass or a second instance says nothing, and a renewal
+(another expiry date) warns again. Its `operationId` is derived from what it tells
+(`UUID.nameUUIDFromBytes("<entity>:<event>:<id>:<expiresOn>")`), so even two passes that both published
+would leave one in the consumer's inbox. The warning of a qualification says the open team of the person
+(as a lineman or as its leader) and the leader of that team, never the person themselves.
+Something that jumps straight past the window (an expired one given today) is only warned about as
+expired. The watcher runs only with the broker on (otherwise the marks would be spent without telling
+anybody); the tests call it by hand.
 
 ## Where each vehicle is
 
@@ -91,6 +160,35 @@ what is observed earlier stays in the history and does not move the position.
 Sources: `MANUAL`, `SHIFT` (derived from `mto-maintenance`), `FIELD` and `TELEMATICS` (later). A
 retired vehicle does not move; `observedAt` is never in the future (one minute of clock skew).
 
+### Track access points
+
+A road-rail vehicle leaves the road and on-tracks at a **track access point**, and off-tracks at one. They
+are master data of `mto-configuration` (its `V28`): a name, the track (always) and maybe a station, a kp
+(in metres, as `mto-configuration` keeps it), a kind (`PREPARED_ACCESS`, `LEVEL_CROSSING`, `DEPOT`), a
+side (`LEFT`, `RIGHT`, `BOTH`), whether it admits road-rail vehicles (`roadRailAccess`), the maximum axle
+load and gross weight it takes (tonnes, optional), its coordinates and `enabled`. This service keeps a
+snapshot of them (`track_access_point`, `V9`), fed by the master-data channel and never edited here
+(`docs/06-messaging.md`); a deletion there disables it here.
+
+A location may say where it on-tracked or off-tracked with `accessPointId` (one of the catalogue), besides
+or instead of the free text `accessPoint`. It is never required, and only when it is given
+`FleetRules.accessPointViolation` checks it, each refusal a 409 `VEH-001` with its reason (an unknown id is
+404 `TAP-404`):
+
+| Rule | Reason |
+|---|---|
+| The access point is enabled | `Access point <name> is disabled: no vehicle on-tracks or off-tracks there` |
+| It is on the track of the location, when the location says one (an `ON_ROAD` after off-tracking says none) | `Access point <name> is on track <id>, not on track <id> of the location` |
+| It admits road-rail vehicles, if the vehicle is one (it says nothing of a rail-only or road-only one) | `Access point <name> does not admit road-rail vehicles: Vehicle <code> cannot on-track or off-track there` |
+| It is a `PREPARED_ACCESS`, if the model needs one (`needsPreparedAccess`) | `Vehicle <code> needs a prepared access, and access point <name> is a <kind>` |
+| It takes the maximum gross weight of the model (`maxGrossT` against `maxGrossWeightT`), when both are known | `Vehicle <code> weighs up to <t> t, more than the <t> t that access point <name> takes` |
+| It takes the maximum axle load of the model (`maxAxleLoadT` against `maxAxleLoadT`), when both are known | `Vehicle <code> has an axle load of up to <t> t, more than the <t> t that access point <name> takes` |
+
+A location that does not say its EP takes the one of the access point, so that the board finds it; its
+track and kp are always the ones the location says.
+The answer of a location says it as `trackAccessPoint` (`{id, name, kind}`, or null), a key of its own:
+`accessPoint` is still the free text.
+
 ### Derived from the shifts
 
 - `shift.started`: rail-only and road-rail vehicles go `ON_TRACK` on the first track of the shift at its
@@ -101,3 +199,16 @@ retired vehicle does not move; `observedAt` is never in the future (one minute o
   since stays. Whatever is attached to them follows on its own.
 - What a fleet rule refuses is recorded as `UNKNOWN` with the reason instead of failing the message;
   the fine detail (where it on-tracked, the low loader) is corrected by hand.
+- If the field device of the shift reported after the `actualEnd` written at closing, the close is
+  recorded one millisecond after its last position: otherwise the watermark would leave it on the track.
+
+### Derived from the field devices
+
+`mto.field.position.reported` (`mto-field`): the device of a shift says the kp of its vehicle. It goes
+`ON_TRACK` on that track and kp with `source = FIELD` and the same reference as the shift
+(`mto-maintenance:shift:<id>`), so that the close of the shift still parks it. A late one stays in the
+history and moves nothing (the watermark). What cannot apply is logged and ignored, never sent to the DLQ:
+a vehicle not in the fleet or retired, a position without a track or a shift, what `FleetRules` refuses
+(a road vehicle is never on the track), and one of a shift that already left the track (its vehicle is
+`PARKED` or `UNKNOWN` by that same shift): `mto-field` stops publishing at the clear-of-track, and what
+arrives afterwards cannot put the vehicle back on the track.

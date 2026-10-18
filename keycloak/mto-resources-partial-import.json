@@ -4,15 +4,15 @@
       "mto-resources-api": [
         {
           "name": "resources-read",
-          "description": "Consulta de personas, organigrama, sitios de aparcamiento, modelos y vehiculos, sus ubicaciones y el tablero de la flota"
+          "description": "Consulta de personas y sus cualificaciones, organigrama, sitios de aparcamiento, modelos, vehiculos y sus documentos, instrumentos, sus ubicaciones y el tablero de la flota"
         },
         {
           "name": "resources-write",
-          "description": "Alta y modificacion de personas, unidades del organigrama, linemen de los equipos y sitios de aparcamiento"
+          "description": "Alta y modificacion de personas y sus cualificaciones, unidades del organigrama, linemen de los equipos, sitios de aparcamiento y tipos de cualificacion"
         },
         {
           "name": "resources-fleet-write",
-          "description": "Alta y modificacion de modelos de vehiculo y de vehiculos"
+          "description": "Alta y modificacion de modelos de vehiculo, de vehiculos y sus documentos y de instrumentos"
         },
         {
           "name": "resources-location-write",
@@ -20,7 +20,7 @@
         },
         {
           "name": "resources-delete",
-          "description": "Desactivar personas, unidades, vehiculos, modelos y sitios (DELETE, o PUT/PATCH con active=false)"
+          "description": "Desactivar personas, unidades, vehiculos, modelos, sitios, tipos de cualificacion e instrumentos, y quitar cualificaciones y documentos (DELETE, o PUT/PATCH con active=false)"
         },
         {
           "name": "ops-metrics",

@@ -109,17 +109,20 @@ public class SecurityConfiguration {
                     authorize.requestMatchers(HttpMethod.POST, API + "/vehicles/*/locations")
                             .hasRole(SecurityRoles.RESOURCES_LOCATION_WRITE);
 
-                    // La flota: vehiculos y sus tipos.
+                    // La flota: vehiculos (y sus documentos), sus tipos y los instrumentos.
                     for (HttpMethod method : WRITE_METHODS) {
                         authorize.requestMatchers(method, API + "/vehicles", API + "/vehicles/**",
-                                API + "/vehicle-types", API + "/vehicle-types/**").hasRole(SecurityRoles.RESOURCES_FLEET_WRITE);
+                                API + "/vehicle-types", API + "/vehicle-types/**",
+                                API + "/instruments", API + "/instruments/**").hasRole(SecurityRoles.RESOURCES_FLEET_WRITE);
                     }
 
-                    // Personal y organizacion: personas, unidades, linemen y sitios de aparcamiento.
+                    // Personal y organizacion: personas (y sus cualificaciones), unidades, linemen, sitios de
+                    // aparcamiento y el catalogo de tipos de cualificacion.
                     for (HttpMethod method : WRITE_METHODS) {
                         authorize.requestMatchers(method, API + "/people", API + "/people/**",
                                 API + "/units", API + "/units/**",
-                                API + "/parking-sites", API + "/parking-sites/**").hasRole(SecurityRoles.RESOURCES_WRITE);
+                                API + "/parking-sites", API + "/parking-sites/**",
+                                API + "/qualification-types", API + "/qualification-types/**").hasRole(SecurityRoles.RESOURCES_WRITE);
                     }
 
                     authorize.requestMatchers(HttpMethod.DELETE, API + "/**").hasRole(SecurityRoles.RESOURCES_DELETE);

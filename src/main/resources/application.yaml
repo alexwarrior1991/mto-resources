@@ -141,6 +141,27 @@ app:
       dead-letter-queue: ${APP_RABBITMQ_MAINTENANCE_DEAD_LETTER_QUEUE:mto.resources.maintenance.queue.dlq}
       dead-letter-routing-key: ${APP_RABBITMQ_MAINTENANCE_DEAD_LETTER_ROUTING_KEY:mto.resources.maintenance.queue.dlq}
       listener-enabled: ${APP_RABBITMQ_MAINTENANCE_LISTENER_ENABLED:true}
+    # Lo que se escucha de mto-field: las posiciones de los dispositivos de un turno, por su exchange de
+    # telemetria (no por mto.field.exchange, que registra mto-notification). La cola y su DLQ son de aqui.
+    field:
+      exchange: ${APP_RABBITMQ_FIELD_EXCHANGE:mto.field.telemetry.exchange}
+      queue: ${APP_RABBITMQ_FIELD_QUEUE:mto.resources.field.queue}
+      routing-key: "${APP_RABBITMQ_FIELD_ROUTING_KEY:mto.field.position.*}"
+      dead-letter-exchange: ${APP_RABBITMQ_FIELD_DEAD_LETTER_EXCHANGE:mto.resources.field.queue.dlx}
+      dead-letter-queue: ${APP_RABBITMQ_FIELD_DEAD_LETTER_QUEUE:mto.resources.field.queue.dlq}
+      dead-letter-routing-key: ${APP_RABBITMQ_FIELD_DEAD_LETTER_ROUTING_KEY:mto.resources.field.queue.dlq}
+      listener-enabled: ${APP_RABBITMQ_FIELD_LISTENER_ENABLED:true}
+    # Lo que se escucha de mto-configuration: solo los puntos de acceso a la via, que las reglas de la flota
+    # miran al registrar donde encarrila una bivial. El exchange y la clave son contrato del emisor; la cola
+    # y su DLQ son de aqui.
+    master-data:
+      exchange: ${APP_RABBITMQ_MASTER_DATA_EXCHANGE:mto.master-data.exchange}
+      queue: ${APP_RABBITMQ_MASTER_DATA_QUEUE:mto.resources.master-data.queue}
+      routing-key: "${APP_RABBITMQ_MASTER_DATA_ROUTING_KEY:mto.master-data.track-access-point.*}"
+      dead-letter-exchange: ${APP_RABBITMQ_MASTER_DATA_DEAD_LETTER_EXCHANGE:mto.resources.master-data.queue.dlx}
+      dead-letter-queue: ${APP_RABBITMQ_MASTER_DATA_DEAD_LETTER_QUEUE:mto.resources.master-data.queue.dlq}
+      dead-letter-routing-key: ${APP_RABBITMQ_MASTER_DATA_DEAD_LETTER_ROUTING_KEY:mto.resources.master-data.queue.dlq}
+      listener-enabled: ${APP_RABBITMQ_MASTER_DATA_LISTENER_ENABLED:true}
     # Exchange propio: personas, equipos y vehiculos, con la clave mto.resources.<entidad>.<evento>.
     # Solo se declara el exchange; las colas son de quien consume (mto-maintenance).
     events:
@@ -193,3 +214,13 @@ app:
     purge-every: 1h
     purge-batch-size: 500
     scheduling-enabled: ${APP_OPERATIONS_SCHEDULING_ENABLED:true}
+
+  # El vigilante diario de caducidades (ExpiryWatchService): avisa una vez por fecha de lo que caduca dentro
+  # de warning-days dias (expiring) y de lo que ya caduco (expired, desde el dia siguiente) en las
+  # cualificaciones de las personas, los documentos de los vehiculos y la calibracion de los instrumentos.
+  # El cron va en UTC, como el reloj del servicio; solo corre con el broker encendido.
+  resources:
+    expiry:
+      enabled: ${APP_RESOURCES_EXPIRY_ENABLED:true}
+      cron: "${APP_RESOURCES_EXPIRY_CRON:0 10 4 * * *}"
+      warning-days: ${APP_RESOURCES_EXPIRY_WARNING_DAYS:30}

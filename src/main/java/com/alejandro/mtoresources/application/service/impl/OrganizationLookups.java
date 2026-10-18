@@ -165,12 +165,21 @@ class OrganizationLookups {
      * para que la version y los linemen que viajan sean los que se van a confirmar.
      */
     void publishTeams(Collection<OrganizationUnit> teams, String eventName) {
+        publishTeams(teams, eventName, false);
+    }
+
+    /** Lo mismo, marcado como republicacion: lo que publica {@code republish} para poner al dia a un consumidor. */
+    void republishTeams(Collection<OrganizationUnit> teams, String eventName) {
+        publishTeams(teams, eventName, true);
+    }
+
+    private void publishTeams(Collection<OrganizationUnit> teams, String eventName, boolean republished) {
         if (teams.isEmpty()) {
             return;
         }
         entityManager.flush();
         for (OrganizationUnit team : teams) {
-            DomainEvent event = ResourcesEvents.team(teamView(team), eventName);
+            DomainEvent event = ResourcesEvents.team(teamView(team), eventName, republished);
             events.publish(event);
         }
     }

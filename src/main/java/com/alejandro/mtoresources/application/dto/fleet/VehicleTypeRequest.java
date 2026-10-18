@@ -16,11 +16,15 @@ import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Alta de un modelo de vehiculo. {@code mobility} y {@code category} deciden el resto: un modelo de solo
  * carretera no lleva ancho de via, uno de solo via no lleva permiso de conducir, y solo una bivial lleva
- * su equipo ferroviario ({@code railGearType}: 9A, 9B o 9C).
+ * su equipo ferroviario ({@code railGearType}: 9A, 9B o 9C). Sin {@code requiredDriverQualificationTypeId},
+ * la habilitacion de su conductor es la de su movilidad: una de solo via autopropulsada, {@code RAIL-DRIVER};
+ * una bivial, {@code RR-OPERATOR}; una de carretera, el permiso que pide ({@code LIC-B}, {@code LIC-C},
+ * {@code LIC-CE}).
  *
  * <p>Ejemplo, {@code POST /vehicle-types} de una bivial:</p>
  * <pre>{@code
@@ -68,6 +72,7 @@ public record VehicleTypeRequest(
         @Min(0) Integer platformLoadKg,
         @DecimalMin("0") @Digits(integer = 4, fraction = 1) BigDecimal platformInsulationKv,
         @DecimalMin("0") @Digits(integer = 6, fraction = 2) BigDecimal towingCapacityT,
-        String notes
+        String notes,
+        UUID requiredDriverQualificationTypeId
 ) {
 }

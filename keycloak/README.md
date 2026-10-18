@@ -35,8 +35,8 @@ Los **permisos** son roles de cliente de `mto-resources-api` y son lo que compru
 | Permiso | Concede |
 |---|---|
 | `resources-read` | Todo `GET`/`HEAD` bajo `/api/v1/resources` |
-| `resources-write` | Personas, unidades del organigrama, linemen de los equipos y sitios de aparcamiento |
-| `resources-fleet-write` | Modelos de vehículo y vehículos |
+| `resources-write` | Personas y sus cualificaciones, unidades del organigrama, linemen de los equipos, sitios de aparcamiento y tipos de cualificación |
+| `resources-fleet-write` | Modelos de vehículo, vehículos y sus documentos, e instrumentos |
 | `resources-location-write` | Solo `POST /vehicles/{id}/locations`: registrar dónde está un vehículo |
 | `resources-delete` | `DELETE`, y `PUT`/`PATCH` con `active=false` |
 | `ops-metrics` | Lectura de los endpoints de Actuator |

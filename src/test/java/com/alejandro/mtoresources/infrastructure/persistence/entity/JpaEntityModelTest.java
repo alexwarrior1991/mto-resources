@@ -1,10 +1,14 @@
 package com.alejandro.mtoresources.infrastructure.persistence.entity;
 
 import com.alejandro.mtoresources.infrastructure.messaging.outbox.OutboxMessage;
+import jakarta.persistence.Column;
+import org.hibernate.annotations.Immutable;
 import org.hibernate.envers.Audited;
+import org.hibernate.envers.NotAudited;
 import org.hibernate.envers.RelationTargetAuditMode;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -21,23 +25,57 @@ class JpaEntityModelTest {
 
     @Test
     void theEntitiesEditedThroughTheApiAreAudited() {
-        for (Class<?> type : List.of(Person.class, OrganizationUnit.class, TeamMember.class, Vehicle.class)) {
+        for (Class<?> type : List.of(Person.class, OrganizationUnit.class, TeamMember.class, Vehicle.class, PersonQualification.class,
+                VehicleDocument.class, Instrument.class)) {
             assertTrue(type.isAnnotationPresent(Audited.class), type.getSimpleName());
         }
     }
 
     @Test
     void cataloguesHistoriesAndNativeSqlTablesAreNotAudited() {
-        for (Class<?> type : List.of(VehicleType.class, ParkingSite.class, VehicleLocationEvent.class, VehiclePosition.class,
-                InboxMessage.class, BackgroundOperation.class, OutboxMessage.class)) {
+        for (Class<?> type : List.of(VehicleType.class, ParkingSite.class, QualificationType.class, VehicleLocationEvent.class,
+                VehiclePosition.class, InboxMessage.class, BackgroundOperation.class, OutboxMessage.class, TrackAccessPoint.class)) {
             assertFalse(type.isAnnotationPresent(Audited.class), type.getSimpleName());
         }
         assertNull(AuditableEntity.class.getAnnotation(Audited.class), "On each entity, never on the base class");
+    }
+
+    /**
+     * La instantanea de los puntos de acceso de mto-configuration solo la escribe el SQL nativo con su marca de
+     * agua: ni se audita (Envers no lo veria) ni Hibernate la puede actualizar.
+     */
+    @Test
+    void theTrackAccessPointsAreASnapshotHibernateOnlyReads() {
+        assertFalse(TrackAccessPoint.class.isAnnotationPresent(Audited.class));
+        assertTrue(TrackAccessPoint.class.isAnnotationPresent(Immutable.class));
+        assertEquals(Object.class, TrackAccessPoint.class.getSuperclass(), "Not an AuditableEntity: only the master data writes it");
     }
 
     @Test
     void theModelOfAVehicleIsReadAsItIsNow() throws NoSuchFieldException {
         Audited audited = Vehicle.class.getDeclaredField("type").getAnnotation(Audited.class);
         assertEquals(RelationTargetAuditMode.NOT_AUDITED, audited.targetAuditMode());
+    }
+
+    @Test
+    void theTypeOfAQualificationIsReadAsItIsNow() throws NoSuchFieldException {
+        Audited audited = PersonQualification.class.getDeclaredField("qualificationType").getAnnotation(Audited.class);
+        assertEquals(RelationTargetAuditMode.NOT_AUDITED, audited.targetAuditMode());
+    }
+
+    /**
+     * Las marcas de aviso de caducidad no son historia y solo las escribe el vigilante con SQL nativo:
+     * Hibernate las lee y nunca las escribe, para que guardar la fila no devuelva una marca vieja.
+     */
+    @Test
+    void theExpiryMarksAreNotAuditedAndHibernateNeverWritesThem() throws NoSuchFieldException {
+        for (Class<?> type : List.of(PersonQualification.class, VehicleDocument.class, Instrument.class)) {
+            for (String mark : List.of("expiringNotifiedFor", "expiredNotifiedFor")) {
+                Field field = type.getDeclaredField(mark);
+                assertTrue(field.isAnnotationPresent(NotAudited.class), type.getSimpleName() + "." + mark);
+                Column column = field.getAnnotation(Column.class);
+                assertFalse(column.insertable() || column.updatable(), type.getSimpleName() + "." + mark);
+            }
+        }
     }
 }
