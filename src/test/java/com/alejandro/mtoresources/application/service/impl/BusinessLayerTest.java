@@ -120,8 +120,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -132,6 +136,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Los servicios contra un PostgreSQL real, con el contexto entero y los eventos capturados por
@@ -1619,6 +1624,92 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         assertEquals(OperationStatus.FAILED, failed.status());
         assertEquals("OPS-410", failed.error().errorCode());
         release.countDown();
+    }
+
+    @Test
+    void anOperationWaitsForTheOneOfAnotherReplicaInItsScopeAndStartsWhenItEnds() throws Exception {
+        authenticateAs("ops.someone");
+        String scope = "test-" + random();
+        UUID elsewhere = UUID.randomUUID();
+        // La de otra replica: en marcha en el mismo ambito y con el latido al dia. El cerrojo local no la ve.
+        jdbc.update("""
+                insert into background_operation (id, kind, scope, status, requested_by, created_at, started_at, heartbeat_at)
+                values (?, 'TEST', ?, 'RUNNING', 'other.replica', now(), now(), now())
+                """, elsewhere, scope);
+        AtomicBoolean ran = new AtomicBoolean();
+
+        UUID id = operations.run("TEST", scope, 200, Duration.ZERO, () -> {
+            ran.set(true);
+            return "ok";
+        }).operation().id();
+
+        Thread.sleep(500);
+        assertEquals(OperationStatus.QUEUED, operations.find(id).status(), "Not while the other replica's one runs");
+        assertFalse(ran.get());
+        jdbc.update("update background_operation set status = 'SUCCEEDED', finished_at = now() where id = ?", elsewhere);
+        assertEquals(OperationStatus.SUCCEEDED, waitFor(id).status(), "It looks again and starts once that one ends");
+        assertTrue(ran.get());
+    }
+
+    @Test
+    void operationScopeLocksQueueTheWorkOfOneScopeAndLetAnotherScopeThrough() throws Exception {
+        OperationScopeLocks locks = new OperationScopeLocks();
+        CountDownLatch holding = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicBoolean secondRan = new AtomicBoolean();
+        try (ExecutorService threads = Executors.newVirtualThreadPerTaskExecutor()) {
+            Future<String> first = threads.submit(() -> locks.withLock("republish", () -> {
+                holding.countDown();
+                await(release);
+                return "first";
+            }));
+            assertTrue(holding.await(5, TimeUnit.SECONDS));
+            Future<String> second = threads.submit(() -> locks.withLock("republish", () -> {
+                secondRan.set(true);
+                return "second";
+            }));
+
+            assertEquals("other", locks.withLock("EP-7", () -> "other"), "Another scope does not wait");
+            assertFalse(secondRan.get(), "The same scope waits for the one that has the turn");
+            assertFalse(second.isDone());
+
+            release.countDown();
+            assertEquals("first", first.get(5, TimeUnit.SECONDS));
+            assertEquals("second", second.get(5, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void anOperationInterruptedWhileWaitingForItsScopeFailsAndKeepsItsInterrupt() throws Exception {
+        OperationScopeLocks locks = new OperationScopeLocks();
+        CountDownLatch holding = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        Thread owner = Thread.ofVirtual().start(() -> locks.withLock("republish", () -> {
+            holding.countDown();
+            await(release);
+            return null;
+        }));
+        assertTrue(holding.await(5, TimeUnit.SECONDS));
+        AtomicReference<RuntimeException> failure = new AtomicReference<>();
+        AtomicBoolean interruptKept = new AtomicBoolean();
+        Thread waiting = Thread.ofVirtual().start(() -> {
+            try {
+                locks.withLock("republish", () -> fail("It never gets the turn"));
+            } catch (RuntimeException expected) {
+                failure.set(expected);
+                interruptKept.set(Thread.currentThread().isInterrupted());
+            }
+        });
+
+        waiting.interrupt();
+        assertTrue(waiting.join(Duration.ofSeconds(5)));
+
+        assertTrue(failure.get() instanceof IllegalStateException, () -> "Failed with " + failure.get());
+        assertTrue(failure.get().getCause() instanceof InterruptedException);
+        assertTrue(interruptKept.get(), "Whoever called it still sees the interrupt");
+        release.countDown();
+        assertTrue(owner.join(Duration.ofSeconds(5)), "The one with the turn is not disturbed");
+        assertEquals("free", locks.withLock("republish", () -> "free"));
     }
 
     // ------------------------------------------------------------------------ fixtures

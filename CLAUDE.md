@@ -114,8 +114,9 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
 - **Permission ≠ position.** Keycloak profiles say what someone may do; the tree says whom they lead.
   This service never writes the realm. The position profiles (`mto-position-*`) live in
   `mto-platform/keycloak/mto-positions-cross-service.json`.
-- **Background work holds no connection while it waits** and is capped for the whole deployment in
-  the database (`BudgetedOperations`); an API route that adopts it does so through
+- **Background work holds no connection while it waits** (in one instance on a lock per scope,
+  `OperationScopeLocks`; between replicas it looks again with a backoff) and is capped for the whole
+  deployment in the database (`BudgetedOperations`); an API route that adopts it does so through
   `Prefer: respond-async` only, so the existing clients stay synchronous.
 - `@Transactional(noRollbackFor = BusinessException.class)` on `VehicleLocationService.record`: its rules
   are checked before writing anything, so a refusal does not doom the inbox transaction of the shift

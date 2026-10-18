@@ -47,8 +47,11 @@ gives its result (the same body the synchronous call would have given, or its er
   the whole deployment, checked under an advisory lock when the row is inserted; above it, 429
   `OPS-429` with `Retry-After`.
 - **One at a time per scope** (`EP-14`, `republish`): the next one waits `QUEUED` and **holds no
-  connection** while it waits — a short transaction tries to start it and, if it is not its turn, it
-  sleeps with a growing backoff (200 ms → 2 s). A sleeping virtual thread costs nothing.
+  connection** while it waits. In one instance it waits on a fair lock per scope
+  (`OperationScopeLocks`), without asking the database, and with that turn a short transaction starts
+  it: the previous one of the instance has already finished and said so. Only when another replica has
+  the scope (the turn in `background_operation` is what holds between replicas) does it let the lock go
+  and look again with a growing backoff (200 ms → 2 s). A waiting virtual thread costs nothing.
 - **Heartbeat and abandon**: every replica beats for its live operations; one whose heartbeat stops for
   `app.operations.stale-after` is failed (`OPS-410`) by any replica. Finished ones are purged after
   `app.operations.retention`.
