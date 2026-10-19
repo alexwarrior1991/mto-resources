@@ -3,6 +3,7 @@ package com.alejandro.mtoresources.domain.model;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.DrivingLicence;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnitKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonCategory;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.RepairStatus;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleAttachment;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCapability;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCategory;
@@ -20,6 +21,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Las reglas sin framework: la dotacion de un equipo, el organigrama y donde puede estar un vehiculo. */
@@ -262,5 +264,41 @@ class DomainModelTest {
         assertEquals(Optional.of("LIC-C"), FleetRules.defaultDriverQualification(VehicleMobility.ROAD_ONLY, true, DrivingLicence.C));
         assertEquals(Optional.of("LIC-CE"), FleetRules.defaultDriverQualification(VehicleMobility.ROAD_ONLY, true, DrivingLicence.C_E));
         assertEquals(Optional.empty(), FleetRules.defaultDriverQualification(VehicleMobility.ROAD_ONLY, true, null));
+    }
+
+    @Test
+    void anUnavailablePeriodIncludesBothEndsAndOneWithoutEndLastsUntilItIsKnown() {
+        LocalDate day = LocalDate.of(2026, 10, 19);
+        UnavailablePeriod week = new UnavailablePeriod(day, day.plusDays(6));
+        UnavailablePeriod open = new UnavailablePeriod(day.plusDays(6), null);
+
+        assertTrue(week.overlaps(open), "They share the last day");
+        assertFalse(week.overlaps(new UnavailablePeriod(day.plusDays(7), day.plusDays(8))));
+        assertTrue(week.endsOnOrAfter(day.plusDays(6)));
+        assertFalse(week.endsOnOrAfter(day.plusDays(7)), "What ended yesterday no longer travels");
+        assertTrue(open.endsOnOrAfter(day.plusYears(1)));
+        assertThrows(IllegalArgumentException.class, () -> new UnavailablePeriod(day, day.minusDays(1)));
+    }
+
+    @Test
+    void aRepairIsPlannedOpenedAndClosedOrCancelledAndOnlyOneThatImmobilisesLeavesTheVehicleUnavailable() {
+        assertEquals(Optional.empty(), RepairRules.transitionViolation("REP-1", RepairStatus.PLANNED, RepairStatus.OPEN));
+        assertEquals(Optional.empty(), RepairRules.transitionViolation("REP-1", RepairStatus.OPEN, RepairStatus.CANCELLED));
+        assertTrue(RepairRules.transitionViolation("REP-1", RepairStatus.PLANNED, RepairStatus.CLOSED).isPresent());
+        assertTrue(RepairRules.transitionViolation("REP-1", RepairStatus.CLOSED, RepairStatus.OPEN).isPresent());
+
+        LocalDate today = LocalDate.of(2026, 10, 19);
+        assertEquals(Optional.of(new UnavailablePeriod(today.plusDays(3), today.plusDays(5))),
+                RepairRules.unavailablePeriod(RepairStatus.PLANNED, true, today.plusDays(3), today.plusDays(5), null, today));
+        assertEquals(Optional.empty(), RepairRules.unavailablePeriod(RepairStatus.PLANNED, false, today, today, null, today),
+                "One that does not immobilise leaves it working");
+        assertEquals(Optional.of(new UnavailablePeriod(today.minusDays(2), null)),
+                RepairRules.unavailablePeriod(RepairStatus.OPEN, true, null, today.minusDays(1), today.minusDays(2), today),
+                "Open past its planned end: it lasts until it is closed");
+        assertEquals(Optional.of(new UnavailablePeriod(today.minusDays(2), today.plusDays(1))),
+                RepairRules.unavailablePeriod(RepairStatus.OPEN, true, null, today.plusDays(1), today.minusDays(2), today));
+        assertEquals(Optional.empty(), RepairRules.unavailablePeriod(RepairStatus.CLOSED, true, today, today, today, today));
+        assertEquals(Optional.empty(), RepairRules.unavailablePeriod(RepairStatus.PLANNED, true, today.minusDays(5), today.minusDays(1),
+                null, today), "A planned one already past does not travel");
     }
 }

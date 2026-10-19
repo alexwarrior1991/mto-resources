@@ -26,7 +26,7 @@ class JpaEntityModelTest {
     @Test
     void theEntitiesEditedThroughTheApiAreAudited() {
         for (Class<?> type : List.of(Person.class, OrganizationUnit.class, TeamMember.class, Vehicle.class, PersonQualification.class,
-                VehicleDocument.class, Instrument.class)) {
+                VehicleDocument.class, Instrument.class, PersonAbsence.class, VehicleRepair.class)) {
             assertTrue(type.isAnnotationPresent(Audited.class), type.getSimpleName());
         }
     }

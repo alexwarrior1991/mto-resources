@@ -18,6 +18,9 @@ import java.util.UUID;
  * Alta de un vehiculo de la flota. Su modelo decide lo que exige: la matricula si va por carretera, el
  * numero de vehiculo ferroviario si su modelo puede ir por via abierta en modo transporte.
  *
+ * <p>{@code telematicsDeviceId}: su dispositivo GPS, por el que llegan sus posiciones
+ * ({@code POST /telematics/positions}); unico, y nulo sin GPS.</p>
+ *
  * <p>Ejemplo, {@code POST /vehicles}:</p>
  * <pre>{@code
  * {"code": "RR-07", "name": "Unimog 7", "typeId": "…", "registrationPlate": "12-345-67",
@@ -38,6 +41,7 @@ public record VehicleRequest(
         @Size(max = 500) String statusReason,
         @Min(0) Integer odometerKm,
         @DecimalMin("0") @Digits(integer = 9, fraction = 1) BigDecimal engineHours,
-        String notes
+        String notes,
+        @Size(max = 64) @Pattern(regexp = "[A-Za-z0-9_.:-]+", message = "letters, digits, '.', ':', '-' and '_' only") String telematicsDeviceId
 ) {
 }

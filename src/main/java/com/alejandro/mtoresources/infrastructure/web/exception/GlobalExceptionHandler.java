@@ -2,14 +2,17 @@ package com.alejandro.mtoresources.infrastructure.web.exception;
 
 import com.alejandro.mtoresources.application.dto.error.ApiErrorResponse;
 import com.alejandro.mtoresources.application.dto.error.ValidationError;
+import com.alejandro.mtoresources.application.exception.AbsenceRuleException;
 import com.alejandro.mtoresources.application.exception.BusinessException;
 import com.alejandro.mtoresources.application.exception.DuplicateCodeException;
 import com.alejandro.mtoresources.application.exception.FleetRuleException;
+import com.alejandro.mtoresources.application.exception.KeycloakUnavailableException;
 import com.alejandro.mtoresources.application.exception.NotFoundException;
 import com.alejandro.mtoresources.application.exception.OrganizationRuleException;
 import com.alejandro.mtoresources.application.exception.QualificationRuleException;
-import com.alejandro.mtoresources.application.exception.TooManyOperationsException;
+import com.alejandro.mtoresources.application.exception.RepairRuleException;
 import com.alejandro.mtoresources.application.exception.StaleVersionException;
+import com.alejandro.mtoresources.application.exception.TooManyOperationsException;
 import com.alejandro.mtoresources.application.exception.ValidationException;
 import jakarta.persistence.OptimisticLockException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -68,11 +71,13 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Regla de organizacion, de flota o de cualificaciones incumplida: el recurso existe pero su estado
-     * no admite la operacion (un equipo que se quedaria sin su jefe o con menos de 2 linemen, una
-     * dresina por carretera, una segunda cualificacion del mismo tipo...).
+     * Regla de organizacion, de flota, de cualificaciones, de ausencias o del taller incumplida: el recurso
+     * existe pero su estado no admite la operacion (un equipo que se quedaria sin su jefe o con menos de 2
+     * linemen, una dresina por carretera, una segunda cualificacion del mismo tipo, dos ausencias que se
+     * solapan, cerrar una reparacion que no se abrio...).
      */
-    @ExceptionHandler({OrganizationRuleException.class, FleetRuleException.class, QualificationRuleException.class})
+    @ExceptionHandler({OrganizationRuleException.class, FleetRuleException.class, QualificationRuleException.class,
+            AbsenceRuleException.class, RepairRuleException.class})
     public ResponseEntity<ApiErrorResponse> handleStateConflict(BusinessException exception, HttpServletRequest request) {
         return businessResponse(exception, HttpStatus.CONFLICT, request);
     }
@@ -88,6 +93,12 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header("Retry-After", String.valueOf(exception.getRetryAfterSeconds()))
                 .body(errorResponse(HttpStatus.TOO_MANY_REQUESTS, exception.getMessage(), errorCode, List.of(), request));
+    }
+
+    /** 503 KCK-503: lo que lee Keycloak no se puede dar ahora; nada se ha escrito. */
+    @ExceptionHandler(KeycloakUnavailableException.class)
+    public ResponseEntity<ApiErrorResponse> handleKeycloakUnavailable(KeycloakUnavailableException exception, HttpServletRequest request) {
+        return businessResponse(exception, HttpStatus.SERVICE_UNAVAILABLE, request);
     }
 
     /**

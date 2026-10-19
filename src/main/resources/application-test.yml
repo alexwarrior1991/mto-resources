@@ -45,6 +45,11 @@ app:
   resources:
     expiry:
       enabled: false
+  # Sin Keycloak: el informe de discrepancias se prueba con un directorio de mentira en BusinessLayerTest y
+  # el cliente, contra un servidor simulado en KeycloakClientTest.
+  keycloak:
+    admin:
+      enabled: false
 
 management:
   endpoint:

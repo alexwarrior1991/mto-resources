@@ -3,6 +3,7 @@ package com.alejandro.mtoresources.application.service.impl;
 import com.alejandro.mtoresources.application.dto.operation.RepublishResult;
 import com.alejandro.mtoresources.application.service.DomainEventPublisher;
 import com.alejandro.mtoresources.application.service.RepublishService;
+import com.alejandro.mtoresources.domain.model.UnavailablePeriod;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Instrument;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnit;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Person;
@@ -52,12 +53,14 @@ class RepublishServiceImpl implements RepublishService {
     private final InstrumentRepository instrumentRepository;
     private final OrganizationLookups lookups;
     private final DomainEventPublisher events;
+    private final Unavailability unavailability;
     private final TransactionTemplate transactions;
 
     RepublishServiceImpl(PersonRepository personRepository, PersonQualificationRepository qualificationRepository,
                          OrganizationUnitRepository unitRepository, VehicleRepository vehicleRepository,
                          VehicleDocumentRepository documentRepository, InstrumentRepository instrumentRepository,
-                         OrganizationLookups lookups, DomainEventPublisher events, PlatformTransactionManager transactionManager) {
+                         OrganizationLookups lookups, DomainEventPublisher events, Unavailability unavailability,
+                         PlatformTransactionManager transactionManager) {
         this.personRepository = personRepository;
         this.qualificationRepository = qualificationRepository;
         this.unitRepository = unitRepository;
@@ -66,6 +69,7 @@ class RepublishServiceImpl implements RepublishService {
         this.instrumentRepository = instrumentRepository;
         this.lookups = lookups;
         this.events = events;
+        this.unavailability = unavailability;
         this.transactions = new TransactionTemplate(transactionManager);
     }
 
@@ -113,8 +117,10 @@ class RepublishServiceImpl implements RepublishService {
             List<Person> people = personRepository.lockAllInIdOrder(ids);
             Map<UUID, List<PersonQualification>> qualifications = qualificationRepository.findAllOfPeople(ids).stream()
                     .collect(Collectors.groupingBy(qualification -> qualification.getPerson().getId()));
+            Map<UUID, List<UnavailablePeriod>> unavailable = unavailability.ofPeople(ids);
             people.forEach(person -> events.publish(ResourcesEvents.person(person,
-                    qualifications.getOrDefault(person.getId(), List.of()), eventName(person.getActive()), true)));
+                    qualifications.getOrDefault(person.getId(), List.of()), unavailable.getOrDefault(person.getId(), List.of()),
+                    eventName(person.getActive()), true)));
             return people.size();
         });
         return published == null ? 0 : published;
@@ -135,8 +141,9 @@ class RepublishServiceImpl implements RepublishService {
             List<Vehicle> vehicles = vehicleRepository.lockAllInIdOrder(ids);
             Map<UUID, List<VehicleDocument>> documents = documentRepository.findAllByVehicleIds(ids).stream()
                     .collect(Collectors.groupingBy(document -> document.getVehicle().getId()));
+            Map<UUID, List<UnavailablePeriod>> unavailable = unavailability.ofVehicles(ids);
             vehicles.forEach(vehicle -> events.publish(ResourcesEvents.vehicle(vehicle, documents.getOrDefault(vehicle.getId(), List.of()),
-                    eventName(vehicle.getActive()), false, true)));
+                    unavailable.getOrDefault(vehicle.getId(), List.of()), eventName(vehicle.getActive()), false, true)));
             return vehicles.size();
         });
         return published == null ? 0 : published;

@@ -109,14 +109,18 @@ public class SecurityConfiguration {
                     authorize.requestMatchers(HttpMethod.POST, API + "/vehicles/*/locations")
                             .hasRole(SecurityRoles.RESOURCES_LOCATION_WRITE);
 
-                    // La flota: vehiculos (y sus documentos), sus tipos y los instrumentos.
+                    // Las posiciones de los GPS: una cuenta de servicio que no toca nada mas.
+                    authorize.requestMatchers(HttpMethod.POST, API + "/telematics/positions")
+                            .hasRole(SecurityRoles.RESOURCES_TELEMATICS_WRITE);
+
+                    // La flota: vehiculos (y sus documentos y reparaciones), sus tipos y los instrumentos.
                     for (HttpMethod method : WRITE_METHODS) {
                         authorize.requestMatchers(method, API + "/vehicles", API + "/vehicles/**",
                                 API + "/vehicle-types", API + "/vehicle-types/**",
                                 API + "/instruments", API + "/instruments/**").hasRole(SecurityRoles.RESOURCES_FLEET_WRITE);
                     }
 
-                    // Personal y organizacion: personas (y sus cualificaciones), unidades, linemen, sitios de
+                    // Personal y organizacion: personas (y sus cualificaciones y ausencias), unidades, linemen, sitios de
                     // aparcamiento y el catalogo de tipos de cualificacion.
                     for (HttpMethod method : WRITE_METHODS) {
                         authorize.requestMatchers(method, API + "/people", API + "/people/**",

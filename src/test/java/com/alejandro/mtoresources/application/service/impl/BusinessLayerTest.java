@@ -1,5 +1,8 @@
 package com.alejandro.mtoresources.application.service.impl;
 
+import com.alejandro.mtoresources.application.dto.absence.PersonAbsenceRequest;
+import com.alejandro.mtoresources.application.dto.absence.PersonAbsenceResponse;
+import com.alejandro.mtoresources.application.dto.absence.PersonAbsenceUpdateRequest;
 import com.alejandro.mtoresources.application.dto.common.MergePatch;
 import com.alejandro.mtoresources.application.dto.expiry.ExpiryWatchResult;
 import com.alejandro.mtoresources.application.dto.fleet.FleetPositionResponse;
@@ -43,11 +46,22 @@ import com.alejandro.mtoresources.application.dto.qualification.QualificationTyp
 import com.alejandro.mtoresources.application.dto.qualification.QualificationTypeResponse;
 import com.alejandro.mtoresources.application.dto.qualification.QualificationTypeSummary;
 import com.alejandro.mtoresources.application.dto.qualification.QualificationTypeUpdateRequest;
+import com.alejandro.mtoresources.application.dto.repair.VehicleRepairRequest;
+import com.alejandro.mtoresources.application.dto.repair.VehicleRepairResponse;
+import com.alejandro.mtoresources.application.dto.repair.VehicleRepairUpdateRequest;
+import com.alejandro.mtoresources.application.dto.report.PositionDiscrepancy;
+import com.alejandro.mtoresources.application.dto.report.PositionDiscrepancyReport;
+import com.alejandro.mtoresources.application.dto.telematics.TelematicsPosition;
+import com.alejandro.mtoresources.application.dto.telematics.TelematicsPositionsRequest;
+import com.alejandro.mtoresources.application.dto.telematics.TelematicsPositionsResponse;
+import com.alejandro.mtoresources.application.exception.AbsenceRuleException;
 import com.alejandro.mtoresources.application.exception.DuplicateCodeException;
 import com.alejandro.mtoresources.application.exception.FleetRuleException;
+import com.alejandro.mtoresources.application.exception.KeycloakUnavailableException;
 import com.alejandro.mtoresources.application.exception.NotFoundException;
 import com.alejandro.mtoresources.application.exception.OrganizationRuleException;
 import com.alejandro.mtoresources.application.exception.QualificationRuleException;
+import com.alejandro.mtoresources.application.exception.RepairRuleException;
 import com.alejandro.mtoresources.application.exception.StaleVersionException;
 import com.alejandro.mtoresources.application.exception.TooManyOperationsException;
 import com.alejandro.mtoresources.application.exception.ValidationException;
@@ -55,17 +69,23 @@ import com.alejandro.mtoresources.application.service.BudgetedOperations;
 import com.alejandro.mtoresources.application.service.DomainEventPublisher;
 import com.alejandro.mtoresources.application.service.ExpiryWatchService;
 import com.alejandro.mtoresources.application.service.InstrumentService;
+import com.alejandro.mtoresources.application.service.KeycloakDirectory;
 import com.alejandro.mtoresources.application.service.OrganizationUnitService;
+import com.alejandro.mtoresources.application.service.PersonAbsenceService;
 import com.alejandro.mtoresources.application.service.PersonQualificationService;
 import com.alejandro.mtoresources.application.service.PersonService;
+import com.alejandro.mtoresources.application.service.PositionDiscrepancyService;
 import com.alejandro.mtoresources.application.service.QualificationTypeService;
 import com.alejandro.mtoresources.application.service.RepublishService;
+import com.alejandro.mtoresources.application.service.TelematicsService;
 import com.alejandro.mtoresources.application.service.TrackAccessPointService;
 import com.alejandro.mtoresources.application.service.VehicleDocumentService;
 import com.alejandro.mtoresources.application.service.VehicleLocationService;
+import com.alejandro.mtoresources.application.service.VehicleRepairService;
 import com.alejandro.mtoresources.application.service.VehicleService;
 import com.alejandro.mtoresources.application.service.VehicleTypeService;
 import com.alejandro.mtoresources.configuration.AuditActorResolver;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.AbsenceKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.DrivingLicence;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.InstrumentKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnitKind;
@@ -73,6 +93,8 @@ import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonCatego
 import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonEmployer;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.QualificationKind;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.RailGearType;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.RepairKind;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.RepairStatus;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleAttachment;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCapability;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCategory;
@@ -94,8 +116,8 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -112,6 +134,7 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -168,6 +191,26 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         RecordingEventPublisher recordingEventPublisher() {
             return new RecordingEventPublisher();
         }
+
+        @Bean
+        @Primary
+        FakeKeycloakDirectory fakeKeycloakDirectory() {
+            return new FakeKeycloakDirectory();
+        }
+    }
+
+    /** Keycloak de mentira: quien tiene cada rol, o que no responde. */
+    static final class FakeKeycloakDirectory implements KeycloakDirectory {
+        final Map<String, List<DirectoryUser>> members = new java.util.concurrent.ConcurrentHashMap<>();
+        volatile boolean failing;
+
+        @Override
+        public List<DirectoryUser> realmRoleMembers(String roleName) {
+            if (failing) {
+                throw new KeycloakUnavailableException("Keycloak is down");
+            }
+            return members.getOrDefault(roleName, List.of());
+        }
     }
 
     @Autowired
@@ -208,6 +251,16 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
     private BudgetedOperations operations;
     @Autowired
     private JdbcTemplate jdbc;
+    @Autowired
+    private PersonAbsenceService absences;
+    @Autowired
+    private VehicleRepairService repairs;
+    @Autowired
+    private TelematicsService telematics;
+    @Autowired
+    private PositionDiscrepancyService discrepancies;
+    @Autowired
+    private FakeKeycloakDirectory directory;
 
     /** Una persona autenticada, como en una peticion: lo que se escribe lleva su nombre y no {@code unknown}. */
     @BeforeEach
@@ -1749,6 +1802,192 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         assertEquals("free", locks.withLock("republish", () -> "free"));
     }
 
+    // -------------------------------------------------------------------- ausencias
+
+    @Test
+    void anAbsenceTravelsAsAPeriodWithoutItsKindAndTwoOfThePersonDoNotOverlap() {
+        PersonResponse person = person(PersonCategory.WORKER);
+        LocalDate today = LocalDate.now();
+        events.clear();
+
+        PersonAbsenceResponse leave = absences.create(person.id(), new PersonAbsenceRequest(AbsenceKind.SICK_LEAVE, today.plusDays(2),
+                today.plusDays(9), "Knee"));
+        DomainEvent event = events.only("person.updated");
+        assertEquals(List.of(period(today.plusDays(2), today.plusDays(9))), event.values().get("unavailable"));
+        assertFalse(event.toString().contains("SICK_LEAVE"), "The kind never leaves the service");
+        assertFalse(event.toString().contains("Knee"), "Nor its notes");
+
+        assertThrows(AbsenceRuleException.class, () -> absences.create(person.id(), new PersonAbsenceRequest(AbsenceKind.VACATION,
+                today.plusDays(9), today.plusDays(12), null)), "The last day is still absent");
+        assertThrows(ValidationException.class, () -> absences.create(person.id(), new PersonAbsenceRequest(AbsenceKind.VACATION,
+                today.plusDays(30), today.plusDays(29), null)));
+        // Una que ya termino se guarda, pero no viaja: nadie pide un turno en el pasado.
+        absences.create(person.id(), new PersonAbsenceRequest(AbsenceKind.TRAINING, today.minusDays(20), today.minusDays(18), null));
+        assertEquals(List.of(period(today.plusDays(2), today.plusDays(9))), events.published.getLast().values().get("unavailable"));
+
+        events.clear();
+        PersonAbsenceResponse longer = absences.patch(person.id(), leave.id(), MergePatch.of(new PersonAbsenceUpdateRequest(null, null,
+                today.plusDays(14), null, leave.version())));
+        assertEquals(today.plusDays(14), longer.endsOn());
+        assertEquals(List.of(period(today.plusDays(2), today.plusDays(14))), events.only("person.updated").values().get("unavailable"));
+        assertThrows(StaleVersionException.class, () -> absences.patch(person.id(), leave.id(), MergePatch.of(new PersonAbsenceUpdateRequest(
+                AbsenceKind.OTHER, null, null, null, leave.version()))));
+        assertThrows(NotFoundException.class, () -> absences.delete(person(PersonCategory.WORKER).id(), leave.id()),
+                "Another person's absence is not found");
+
+        events.clear();
+        absences.delete(person.id(), leave.id());
+        assertEquals(List.of(), events.only("person.updated").values().get("unavailable"));
+        assertEquals(1, absences.findAll(person.id()).size());
+        // Lo que publica cualquier otro cambio de la persona lleva tambien cuando no esta.
+        absences.create(person.id(), new PersonAbsenceRequest(AbsenceKind.VACATION, today, today, null));
+        events.clear();
+        people.patch(person.id(), MergePatch.of(new PersonUpdateRequest("Renamed", null, null, null, null, null, null, null, null, null,
+                null)));
+        assertEquals(List.of(period(today, today)), events.only("person.updated").values().get("unavailable"));
+    }
+
+    // ------------------------------------------------------------------------- taller
+
+    @Test
+    void aRepairThatImmobilisesRulesTheStatusOfTheVehicleAndTravelsAsUnavailable() {
+        VehicleResponse vehicle = railVehicle(Set.of());
+        LocalDate today = LocalDate.now();
+        events.clear();
+
+        VehicleRepairResponse planned = repairs.create(vehicle.id(), new VehicleRepairRequest(RepairKind.SERVICE, null, null,
+                "Annual service", "Plasser", today.plusDays(10), today.plusDays(12), null, null, null, null));
+        assertTrue(planned.code().matches("REP-\\d{6}"), planned.code());
+        assertEquals(RepairStatus.PLANNED, planned.status());
+        DomainEvent plannedEvent = events.only("vehicle.updated");
+        assertEquals(List.of(period(today.plusDays(10), today.plusDays(12))), plannedEvent.values().get("unavailable"));
+        assertEquals(false, plannedEvent.values().get("availabilityChanged"), "Planned: it still works today");
+        assertEquals(VehicleOperationalStatus.OPERATIONAL, vehicles.findById(vehicle.id()).operationalStatus());
+        assertThrows(ValidationException.class, () -> repairs.create(vehicle.id(), new VehicleRepairRequest(RepairKind.SERVICE, null, null,
+                "No date", null, null, null, null, null, null, null)), "A planned repair says when");
+        assertThrows(RepairRuleException.class, () -> repairs.close(vehicle.id(), planned.id()), "It was never opened");
+
+        events.clear();
+        VehicleRepairResponse breakdown = repairs.create(vehicle.id(), new VehicleRepairRequest(RepairKind.BREAKDOWN, RepairStatus.OPEN, null,
+                "Hydraulic leak", null, null, null, 48210, null, null, null));
+        assertNotNull(breakdown.openedAt());
+        VehicleResponse inTheWorkshop = vehicles.findById(vehicle.id());
+        assertEquals(VehicleOperationalStatus.UNDER_REPAIR, inTheWorkshop.operationalStatus());
+        assertEquals("Repair " + breakdown.code(), inTheWorkshop.statusReason());
+        DomainEvent opened = events.only("vehicle.updated");
+        assertEquals(true, opened.values().get("availabilityChanged"));
+        assertEquals(List.of(period(today, null), period(today.plusDays(10), today.plusDays(12))), opened.values().get("unavailable"),
+                "Open without an end, and the planned one after it");
+        assertThrows(FleetRuleException.class, () -> vehicles.patch(vehicle.id(), MergePatch.of(vehicleUpdate(
+                VehicleOperationalStatus.OPERATIONAL, null))), "The repair rules: it is closed, not overridden");
+        assertThrows(RepairRuleException.class, () -> repairs.patch(vehicle.id(), breakdown.id(), MergePatch.of(new VehicleRepairUpdateRequest(
+                null, false, null, null, null, null, null, null, null, null, null))), "Decided before opening it");
+
+        events.clear();
+        VehicleRepairResponse closed = repairs.close(vehicle.id(), breakdown.id());
+        assertEquals(RepairStatus.CLOSED, closed.status());
+        assertNotNull(closed.closedAt());
+        VehicleResponse back = vehicles.findById(vehicle.id());
+        assertEquals(VehicleOperationalStatus.OPERATIONAL, back.operationalStatus());
+        assertNull(back.statusReason());
+        assertEquals(true, events.only("vehicle.updated").values().get("availabilityChanged"));
+        assertThrows(RepairRuleException.class, () -> repairs.cancel(vehicle.id(), breakdown.id()), "Closed does not come back");
+
+        // Uno fuera de servicio a mano no lo toca la reparacion: ni al abrirla ni al cerrarla.
+        vehicles.patch(vehicle.id(), MergePatch.of(vehicleUpdate(VehicleOperationalStatus.OUT_OF_SERVICE, "Waiting for a decision")));
+        repairs.open(vehicle.id(), planned.id());
+        assertEquals(VehicleOperationalStatus.OUT_OF_SERVICE, vehicles.findById(vehicle.id()).operationalStatus());
+        repairs.cancel(vehicle.id(), planned.id());
+        assertEquals(VehicleOperationalStatus.OUT_OF_SERVICE, vehicles.findById(vehicle.id()).operationalStatus());
+        assertEquals(List.of(), events.published.getLast().values().get("unavailable"));
+        assertEquals(List.of(planned.code(), breakdown.code()).stream().sorted(Comparator.reverseOrder()).toList(),
+                repairs.findAll(vehicle.id()).stream().map(VehicleRepairResponse::code).toList(), "The most recent first");
+    }
+
+    // ---------------------------------------------------------------------------- GPS
+
+    @Test
+    void aGpsPositionMovesARoadVehicleOnTheRoadAtMostEveryFiveMinutes() {
+        VehicleResponse van = vehicles.create(vehicleRequestWithDevice(types.create(typeRequest(VehicleMobility.ROAD_ONLY, VehicleCategory.VAN,
+                null, false, Set.of())).id(), "VN-" + random(), "GPS-" + random()));
+        VehicleResponse towerCar = railVehicle(Set.of());
+        String railDevice = "GPS-" + random();
+        vehicles.patch(towerCar.id(), MergePatch.of(new com.alejandro.mtoresources.application.dto.fleet.VehicleUpdateRequest(null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null, railDevice)));
+        assertThrows(DuplicateCodeException.class, () -> vehicles.create(vehicleRequestWithDevice(types.create(typeRequest(
+                VehicleMobility.ROAD_ONLY, VehicleCategory.VAN, null, false, Set.of())).id(), "VN-" + random(), van.telematicsDeviceId())));
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+
+        TelematicsPositionsResponse first = telematics.ingest(new TelematicsPositionsRequest(List.of(
+                gps(van.telematicsDeviceId(), now.minusSeconds(420)),
+                gps(van.telematicsDeviceId(), now.minusSeconds(600)),
+                gps(railDevice, now.minusSeconds(600)),
+                gps("GPS-NOBODY-" + random(), now.minusSeconds(600)))));
+        assertEquals(1, first.recorded(), first.toString());
+        assertEquals(3, first.ignored());
+        VehicleResponse onTheRoad = vehicles.findById(van.id());
+        assertEquals(VehicleLocationKind.ON_ROAD, onTheRoad.position().kind());
+        assertEquals(VehicleLocationSource.TELEMATICS, onTheRoad.position().source());
+        assertEquals(now.minusSeconds(600), onTheRoad.position().observedAt(), "In order of observedAt: the first one counts");
+        assertTrue(first.results().stream().anyMatch(result -> result.reason() != null && result.reason().contains("rail-only")));
+        assertTrue(first.results().stream().anyMatch(result -> result.reason() != null && result.reason().contains("GPS of no vehicle")));
+        assertTrue(first.results().stream().anyMatch(result -> result.reason() != null && result.reason().startsWith("Less than 5 min")));
+
+        assertEquals(1, telematics.ingest(new TelematicsPositionsRequest(List.of(gps(van.telematicsDeviceId(), now.minusSeconds(240)),
+                gps(van.telematicsDeviceId(), now)))).recorded(), "Five minutes after the last one, the next");
+
+        // En la via por un turno: hasta que se cierre, manda el turno.
+        VehicleResponse roadRail = roadRailVehicle(false, null, null);
+        String roadRailDevice = "GPS-" + random();
+        vehicles.patch(roadRail.id(), MergePatch.of(new com.alejandro.mtoresources.application.dto.fleet.VehicleUpdateRequest(null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null, roadRailDevice)));
+        shiftHandler.handle(new IncomingEvent("shift", UUID.randomUUID().toString(), "started",
+                shiftValues(now.minusSeconds(3600), null, List.of(roadRail.id()), List.of())), context());
+        TelematicsPositionsResponse onTrack = telematics.ingest(new TelematicsPositionsRequest(List.of(gps(roadRailDevice, now))));
+        assertEquals(0, onTrack.recorded());
+        assertTrue(onTrack.results().getFirst().reason().contains("on the track in a shift"), onTrack.toString());
+    }
+
+    // ------------------------------------------------------------- informe de discrepancias
+
+    @Test
+    void theDiscrepancyReportComparesThePositionProfilesOfKeycloakWithTheCategories() {
+        PersonResponse right = person(PersonCategory.TEAM_LEADER);
+        PersonResponse wrong = person(PersonCategory.TEAM_LEADER);
+        PersonResponse several = person(PersonCategory.SUPERVISOR);
+        PersonResponse without = person(PersonCategory.WORKER);
+        PersonResponse chiefConstruction = person(PersonCategory.CHIEF_CONSTRUCTION);
+        PersonResponse gone = person(PersonCategory.WORKER);
+        people.deactivate(gone.id());
+        String stranger = "nobody." + random().toLowerCase(Locale.ROOT);
+        directory.members.clear();
+        directory.members.put("mto-position-team-leader", List.of(user(right.username()), user(several.username())));
+        directory.members.put("mto-position-worker", List.of(user(wrong.username().toUpperCase(Locale.ROOT)), user(gone.username()),
+                user(stranger)));
+        directory.members.put("mto-position-supervisor", List.of(user(several.username())));
+
+        PositionDiscrepancyReport report = discrepancies.report();
+
+        Set<String> mine = Set.of(right.username(), wrong.username(), several.username(), without.username(), chiefConstruction.username(),
+                gone.username(), stranger);
+        assertEquals(List.of(wrong.username()), usernames(report.wrongProfile(), mine));
+        PositionDiscrepancy wrongOne = report.wrongProfile().stream().filter(item -> item.username().equals(wrong.username())).findFirst()
+                .orElseThrow();
+        assertEquals("mto-position-team-leader", wrongOne.expectedProfile());
+        assertEquals(List.of("mto-position-worker"), wrongOne.profiles());
+        assertEquals(List.of(several.username()), usernames(report.severalProfiles(), mine));
+        assertEquals(List.of(without.username()), usernames(report.withoutProfile(), mine), "A chief of construction has no profile yet");
+        assertEquals(Set.of(gone.username(), stranger), Set.copyOf(usernames(report.withoutRecord(), mine)));
+        assertEquals(5, report.usersWithPosition());
+
+        directory.failing = true;
+        try {
+            assertThrows(KeycloakUnavailableException.class, () -> discrepancies.report());
+        } finally {
+            directory.failing = false;
+        }
+    }
+
     // ------------------------------------------------------------------------ fixtures
 
     private static Set<UUID> instrumentIds(List<InstrumentResponse> instruments) {
@@ -1841,13 +2080,13 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
     }
 
     private static VehicleRequest vehicleRequest(UUID typeId, String plate, String railNumber) {
-        return new VehicleRequest("V" + random(), "Vehicle", typeId, plate, railNumber, null, null, null, null, null, null, null, null, null);
+        return new VehicleRequest("V" + random(), "Vehicle", typeId, plate, railNumber, null, null, null, null, null, null, null, null, null, null);
     }
 
     private static com.alejandro.mtoresources.application.dto.fleet.VehicleUpdateRequest vehicleUpdate(VehicleOperationalStatus status,
                                                                                                          String reason) {
         return new com.alejandro.mtoresources.application.dto.fleet.VehicleUpdateRequest(null, null, null, null, null, null, null, null,
-                status, reason, null, null, null, null, null);
+                status, reason, null, null, null, null, null, null);
     }
 
     /** Una bivial de un modelo que exige acceso preparado o no, con sus pesos (o sin ellos). */
@@ -2061,6 +2300,32 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(interrupted);
         }
+    }
+
+    /** Un periodo como viaja en {@code unavailable}. */
+    private static Map<String, Object> period(LocalDate from, LocalDate to) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("from", from.toString());
+        values.put("to", to == null ? null : to.toString());
+        return values;
+    }
+
+    private static VehicleRequest vehicleRequestWithDevice(UUID typeId, String plate, String device) {
+        return new VehicleRequest("V" + random(), "Vehicle", typeId, plate, null, null, null, null, null, null, null, null, null, null, device);
+    }
+
+    private static TelematicsPosition gps(String deviceId, Instant observedAt) {
+        return new TelematicsPosition(deviceId, observedAt, new BigDecimal("32.794046"), new BigDecimal("34.989571"));
+    }
+
+    private static KeycloakDirectory.DirectoryUser user(String username) {
+        return new KeycloakDirectory.DirectoryUser(UUID.randomUUID().toString(), username, true);
+    }
+
+    /** Los usuarios de esa lista que son de este caso: la base se comparte. */
+    private static List<String> usernames(List<PositionDiscrepancy> items, Set<String> mine) {
+        return items.stream().map(PositionDiscrepancy::username).map(username -> username.toLowerCase(Locale.ROOT))
+                .filter(mine::contains).sorted().toList();
     }
 
     private static String random() {

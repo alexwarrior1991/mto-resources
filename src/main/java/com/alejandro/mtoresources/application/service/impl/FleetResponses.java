@@ -53,6 +53,7 @@ class FleetResponses {
                 vehicle.getOdometerKm(),
                 vehicle.getEngineHours(),
                 vehicle.getNotes(),
+                vehicle.getTelematicsDeviceId(),
                 position == null ? null : location(position.getLocationEvent()),
                 vehicle.getActive(),
                 vehicle.getVersion(),

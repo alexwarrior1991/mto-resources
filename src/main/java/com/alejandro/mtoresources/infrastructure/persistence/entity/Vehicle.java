@@ -107,6 +107,11 @@ public class Vehicle extends VersionedEntity {
     @Column(name = "notes", columnDefinition = "text")
     private String notes;
 
+    /** El dispositivo GPS por el que llegan sus posiciones ({@code POST /telematics/positions}); nulo, sin GPS. */
+    @Size(max = 64)
+    @Column(name = "telematics_device_id", length = 64)
+    private String telematicsDeviceId;
+
     @NotNull
     @Builder.Default
     @Column(name = "active", nullable = false)

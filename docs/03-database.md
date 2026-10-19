@@ -106,6 +106,19 @@ disables a known row (`deactivateFromMasterData`). It has no `version` (nobody e
 no `_aud` twin (`docs/07-auditing.md`). `vehicle_location_event` is not audited either, so its new column has
 no twin to change.
 
+## Absences (`V11`)
+
+| Table | Key columns | Constraints and indexes |
+|---|---|---|
+| `person_absence` | `person_id`, `kind` (`absence_kind`: `VACATION`, `SICK_LEAVE`, `TRAINING`, `PERSONAL`, `OTHER`), `starts_on`, `ends_on` (both included), `notes` (500), `version` | `ends_on >= starts_on`; index on `(person_id, starts_on)`. That two of a person do not overlap is decided by the service with the person row locked. Audited (`person_absence_aud`) |
+
+## Workshop and GPS (`V12`)
+
+| Table | Key columns | Constraints and indexes |
+|---|---|---|
+| `vehicle_repair` | `code` (`REP-000001`, from `vehicle_repair_code_seq`), `vehicle_id`, `kind` (`repair_kind`), `status` (`repair_status`: `PLANNED`, `OPEN`, `CLOSED`, `CANCELLED`), `immobilises`, `description` (500), `workshop` (150), `planned_from`, `planned_to`, `opened_at`, `closed_at`, `odometer_km`, `engine_hours` (`numeric(10,1)`), `cost` (`numeric(12,2)`), `notes`, `version` | `code` unique; `planned_to >= planned_from`; a `PLANNED` one has `planned_from`, an `OPEN` or `CLOSED` one `opened_at`, a `CLOSED` one `closed_at` (not before the opening); counters and cost not negative; index on `(vehicle_id, status)`. Audited (`vehicle_repair_aud`) |
+| `vehicle.telematics_device_id` | its GPS device (64; null: none) | unique; its twin in `vehicle_aud` in the same migration |
+
 ## Background operations (`V4`)
 
 `background_operation`: `id`, `kind`, `scope`, `status` (`QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`),

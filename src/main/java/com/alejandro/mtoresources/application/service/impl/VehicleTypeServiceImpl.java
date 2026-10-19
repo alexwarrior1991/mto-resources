@@ -15,6 +15,7 @@ import com.alejandro.mtoresources.application.mapper.VehicleTypeMapper;
 import com.alejandro.mtoresources.application.service.DomainEventPublisher;
 import com.alejandro.mtoresources.application.service.VehicleTypeService;
 import com.alejandro.mtoresources.domain.model.FleetRules;
+import com.alejandro.mtoresources.domain.model.UnavailablePeriod;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.QualificationType;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Vehicle;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCapability;
@@ -58,6 +59,7 @@ class VehicleTypeServiceImpl implements VehicleTypeService {
     private final QualificationTypeRepository qualificationTypeRepository;
     private final VehicleTypeMapper mapper;
     private final DomainEventPublisher events;
+    private final Unavailability unavailability;
 
     @Override
     @Transactional
@@ -185,9 +187,10 @@ class VehicleTypeServiceImpl implements VehicleTypeService {
         Map<UUID, List<VehicleDocument>> documents = vehicles.isEmpty() ? Map.of()
                 : documentRepository.findAllByVehicleIds(vehicles.stream().map(Vehicle::getId).toList()).stream()
                 .collect(Collectors.groupingBy(document -> document.getVehicle().getId()));
+        Map<UUID, List<UnavailablePeriod>> unavailable = unavailability.ofVehicles(vehicles.stream().map(Vehicle::getId).toList());
         for (Vehicle vehicle : vehicles) {
             events.publish(ResourcesEvents.vehicle(vehicle, documents.getOrDefault(vehicle.getId(), List.of()),
-                    Boolean.TRUE.equals(vehicle.getActive()) ? ResourcesEvents.UPDATED : ResourcesEvents.DEACTIVATED));
+                    unavailable.getOrDefault(vehicle.getId(), List.of()), Boolean.TRUE.equals(vehicle.getActive()) ? ResourcesEvents.UPDATED : ResourcesEvents.DEACTIVATED));
         }
         return mapper.toResponse(saved);
     }

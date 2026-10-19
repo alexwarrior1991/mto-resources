@@ -165,6 +165,47 @@ class ApiAuthorizationRulesTest {
     }
 
     @Test
+    void theAbsencesOfAPersonAreResourcesWriteAndRemovingOneIsDelete() throws Exception {
+        expect(get(API + "/people/1/absences"), 200, SecurityRoles.RESOURCES_READ);
+        expect(post(API + "/people/1/absences"), 200, SecurityRoles.RESOURCES_WRITE);
+        expect(patch(API + "/people/1/absences/2"), 200, SecurityRoles.RESOURCES_WRITE);
+        expect(post(API + "/people/1/absences"), 403, SecurityRoles.RESOURCES_FLEET_WRITE, SecurityRoles.RESOURCES_LOCATION_WRITE,
+                SecurityRoles.RESOURCES_DELETE, SecurityRoles.RESOURCES_TELEMATICS_WRITE);
+        expect(delete(API + "/people/1/absences/2"), 200, SecurityRoles.RESOURCES_DELETE);
+        expect(delete(API + "/people/1/absences/2"), 403, SecurityRoles.RESOURCES_WRITE);
+    }
+
+    @Test
+    void theRepairsOfAVehicleAreFleetWrite() throws Exception {
+        expect(get(API + "/vehicles/1/repairs"), 200, SecurityRoles.RESOURCES_READ);
+        for (MockHttpServletRequestBuilder request : new MockHttpServletRequestBuilder[]{post(API + "/vehicles/1/repairs"),
+                patch(API + "/vehicles/1/repairs/2"), post(API + "/vehicles/1/repairs/2/open"), post(API + "/vehicles/1/repairs/2/close"),
+                post(API + "/vehicles/1/repairs/2/cancel")}) {
+            expect(request, 200, SecurityRoles.RESOURCES_FLEET_WRITE);
+        }
+        expect(post(API + "/vehicles/1/repairs"), 403, SecurityRoles.RESOURCES_WRITE, SecurityRoles.RESOURCES_LOCATION_WRITE,
+                SecurityRoles.RESOURCES_DELETE, SecurityRoles.RESOURCES_TELEMATICS_WRITE);
+    }
+
+    /** Las posiciones de los GPS las manda una cuenta de servicio con su rol, y ese rol no abre nada mas. */
+    @Test
+    void theGpsPositionsAreTelematicsWriteAndThatRoleOpensNothingElse() throws Exception {
+        expect(post(API + "/telematics/positions"), 200, SecurityRoles.RESOURCES_TELEMATICS_WRITE);
+        expect(post(API + "/telematics/positions"), 403, SecurityRoles.RESOURCES_WRITE, SecurityRoles.RESOURCES_FLEET_WRITE,
+                SecurityRoles.RESOURCES_LOCATION_WRITE, SecurityRoles.RESOURCES_DELETE, SecurityRoles.RESOURCES_READ);
+        expect(post(API + "/vehicles/1/locations"), 403, SecurityRoles.RESOURCES_TELEMATICS_WRITE);
+        expect(patch(API + "/vehicles/1"), 403, SecurityRoles.RESOURCES_TELEMATICS_WRITE);
+        expect(get(API + "/people"), 403, SecurityRoles.RESOURCES_TELEMATICS_WRITE);
+    }
+
+    @Test
+    void theDiscrepancyReportIsReadWithResourcesRead() throws Exception {
+        expect(get(API + "/reports/position-discrepancies"), 200, SecurityRoles.RESOURCES_READ);
+        expect(get(API + "/reports/position-discrepancies"), 403, SecurityRoles.RESOURCES_WRITE, SecurityRoles.RESOURCES_FLEET_WRITE,
+                SecurityRoles.RESOURCES_TELEMATICS_WRITE);
+    }
+
+    @Test
     void deletingIsResourcesDeleteAndWritingDoesNotImplyIt() throws Exception {
         expect(delete(API + "/people/1"), 200, SecurityRoles.RESOURCES_DELETE);
         expect(delete(API + "/vehicles/1"), 200, SecurityRoles.RESOURCES_DELETE);
@@ -240,20 +281,23 @@ class ApiAuthorizationRulesTest {
     static class Probes {
 
         @GetMapping({"/people", "/vehicles/positions", "/qualification-types", "/people/{id}/qualifications", "/vehicles/{id}/documents",
-                "/instruments", "/instruments/{id}/revisions", "/track-access-points"})
+                "/instruments", "/instruments/{id}/revisions", "/track-access-points", "/people/{id}/absences", "/vehicles/{id}/repairs",
+                "/reports/position-discrepancies"})
         String read() {
             return "ok";
         }
 
         @PostMapping({"/people", "/units", "/parking-sites", "/vehicles", "/vehicles/{id}/locations", "/units/{id}/members/{person}/leave",
                 "/undeclared", "/qualification-types", "/people/{id}/qualifications", "/vehicles/{id}/documents", "/instruments",
-                "/track-access-points"})
+                "/track-access-points", "/people/{id}/absences", "/vehicles/{id}/repairs", "/vehicles/{id}/repairs/{repair}/open",
+                "/vehicles/{id}/repairs/{repair}/close", "/vehicles/{id}/repairs/{repair}/cancel", "/telematics/positions"})
         String create() {
             return "ok";
         }
 
         @PatchMapping({"/people/{id}", "/vehicles/{id}", "/vehicle-types/{id}", "/qualification-types/{id}",
-                "/people/{id}/qualifications/{qualification}", "/vehicles/{id}/documents/{document}", "/instruments/{id}"})
+                "/people/{id}/qualifications/{qualification}", "/vehicles/{id}/documents/{document}", "/instruments/{id}",
+                "/people/{id}/absences/{absence}", "/vehicles/{id}/repairs/{repair}"})
         String patchIt(@PathVariable String id) {
             return "ok";
         }
@@ -264,7 +308,7 @@ class ApiAuthorizationRulesTest {
         }
 
         @DeleteMapping({"/people/{id}", "/vehicles/{id}", "/qualification-types/{id}", "/people/{id}/qualifications/{qualification}",
-                "/vehicles/{id}/documents/{document}", "/instruments/{id}"})
+                "/vehicles/{id}/documents/{document}", "/instruments/{id}", "/people/{id}/absences/{absence}"})
         String remove(@PathVariable String id) {
             return "ok";
         }

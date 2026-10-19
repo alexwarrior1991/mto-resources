@@ -2,6 +2,7 @@ package com.alejandro.mtoresources.application.service.impl;
 
 import com.alejandro.mtoresources.application.dto.messaging.DomainEvent;
 import com.alejandro.mtoresources.domain.model.ExpiryRules;
+import com.alejandro.mtoresources.domain.model.UnavailablePeriod;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Instrument;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.OrganizationUnit;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Person;
@@ -40,9 +41,15 @@ import java.util.UUID;
  * disponible a no disponible o al reves, para que un aviso de «fuera de servicio» salga una vez y no con
  * cada cambio de notas.</p>
  *
- * <p>Una lista (las cualificaciones de una persona, los documentos de un vehiculo) viaja siempre entera:
- * quien guarda una instantanea sustituye la que tenia por la que llega. Las fechas viajan como texto ISO
- * ({@code 2027-03-31}).</p>
+ * <p>Una lista (las cualificaciones de una persona, los documentos de un vehiculo, cuando no esta
+ * disponible) viaja siempre entera: quien guarda una instantanea sustituye la que tenia por la que llega.
+ * Las fechas viajan como texto ISO ({@code 2027-03-31}).</p>
+ *
+ * <p>{@code unavailable} ({@code [{from, to}]}, las dos fechas incluidas y {@code to} nulo sin fin conocido)
+ * dice cuando no esta disponible una persona (sus ausencias) o un vehiculo (las reparaciones que lo
+ * inmovilizan, planificadas o abiertas), solo lo que termina hoy o despues y nunca el motivo: una baja
+ * medica no sale de este servicio ({@code mto-notification} copia {@code values} en su registro). Todo quien
+ * publica uno de esos eventos la pide a {@code Unavailability}.</p>
  *
  * <p>Los avisos de caducidad ({@code qualification}, {@code vehicle-document}, {@code calibration}, con
  * {@code expiring} y {@code expired}) no son una instantanea sino un hecho de un dia: no se republican, los
@@ -76,12 +83,15 @@ public final class ResourcesEvents {
      * @param qualifications todas las de la persona, tambien las caducadas: el consumidor decide por la
      *                       fecha. Viajan siempre enteras, porque quien guarda una instantanea sustituye la
      *                       lista que tenia por la que llega.
+     * @param unavailable    sus ausencias que terminan hoy o despues, sin su clase
      */
-    public static DomainEvent person(Person person, List<PersonQualification> qualifications, String eventName) {
-        return person(person, qualifications, eventName, false);
+    public static DomainEvent person(Person person, List<PersonQualification> qualifications, List<UnavailablePeriod> unavailable,
+                                     String eventName) {
+        return person(person, qualifications, unavailable, eventName, false);
     }
 
-    public static DomainEvent person(Person person, List<PersonQualification> qualifications, String eventName, boolean republished) {
+    public static DomainEvent person(Person person, List<PersonQualification> qualifications, List<UnavailablePeriod> unavailable,
+                                     String eventName, boolean republished) {
         Map<String, Object> values = new LinkedHashMap<>();
         values.put("code", person.getCode());
         values.put("firstName", person.getFirstName());
@@ -99,6 +109,7 @@ public final class ResourcesEvents {
                 .sorted(Comparator.comparing((PersonQualification qualification) -> qualification.getQualificationType().getCode()))
                 .map(ResourcesEvents::qualificationRef)
                 .toList());
+        values.put("unavailable", periods(unavailable));
         return new DomainEvent(PERSON, id(person.getId()), eventName, values);
     }
 
@@ -175,20 +186,23 @@ public final class ResourcesEvents {
 
     // ----------------------------------------------------------------------------- vehicles
 
-    public static DomainEvent vehicle(Vehicle vehicle, List<VehicleDocument> documents, String eventName) {
-        return vehicle(vehicle, documents, eventName, false, false);
+    public static DomainEvent vehicle(Vehicle vehicle, List<VehicleDocument> documents, List<UnavailablePeriod> unavailable,
+                                      String eventName) {
+        return vehicle(vehicle, documents, unavailable, eventName, false, false);
     }
 
     /**
      * @param documents           todos los del vehiculo, tambien los caducados; viajan enteros, como las
      *                            cualificaciones de una persona
+     * @param unavailable         las reparaciones que lo inmovilizan, planificadas o abiertas, que terminan
+     *                            hoy o despues
      * @param availabilityChanged si el cambio que se cuenta paso el vehiculo de disponible a no disponible
      *                            o al reves (un alta, un cambio de su modelo, de sus documentos o una
      *                            republicacion no lo hacen)
      * @param republished         si es una republicacion de lo ya contado
      */
-    public static DomainEvent vehicle(Vehicle vehicle, List<VehicleDocument> documents, String eventName, boolean availabilityChanged,
-                                      boolean republished) {
+    public static DomainEvent vehicle(Vehicle vehicle, List<VehicleDocument> documents, List<UnavailablePeriod> unavailable,
+                                      String eventName, boolean availabilityChanged, boolean republished) {
         VehicleType type = vehicle.getType();
         Map<String, Object> values = new LinkedHashMap<>();
         values.put("code", vehicle.getCode());
@@ -220,6 +234,7 @@ public final class ResourcesEvents {
                 .sorted(Comparator.comparing((VehicleDocument document) -> document.getKind().name()))
                 .map(ResourcesEvents::documentRef)
                 .toList());
+        values.put("unavailable", periods(unavailable));
         return new DomainEvent(VEHICLE, id(vehicle.getId()), eventName, values);
     }
 
@@ -314,6 +329,19 @@ public final class ResourcesEvents {
     public static UUID expiryOperationId(DomainEvent event, LocalDate expiresOn) {
         String key = event.entityName() + ":" + event.eventName() + ":" + event.entityId() + ":" + expiresOn;
         return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** Cada periodo como {@code {from, to}}, en orden; nunca el motivo. */
+    private static List<Map<String, Object>> periods(List<UnavailablePeriod> unavailable) {
+        return unavailable.stream()
+                .sorted(Comparator.comparing(UnavailablePeriod::from))
+                .map(period -> {
+                    Map<String, Object> ref = new LinkedHashMap<>();
+                    ref.put("from", date(period.from()));
+                    ref.put("to", date(period.to()));
+                    return ref;
+                })
+                .toList();
     }
 
     private static String id(UUID id) {

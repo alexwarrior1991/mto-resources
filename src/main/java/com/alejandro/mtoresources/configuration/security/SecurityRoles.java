@@ -31,6 +31,12 @@ public final class SecurityRoles {
      */
     public static final String RESOURCES_LOCATION_WRITE = "RESOURCES_LOCATION_WRITE";
 
+    /**
+     * Mandar las posiciones de los dispositivos GPS: solo {@code POST /telematics/positions}. Lo tiene la
+     * cuenta de servicio {@code mto-telematics-svc}, no una persona.
+     */
+    public static final String RESOURCES_TELEMATICS_WRITE = "RESOURCES_TELEMATICS_WRITE";
+
     /** Todo DELETE (desactivar una persona o una unidad, retirar un vehiculo) y desactivar con PATCH. */
     public static final String RESOURCES_DELETE = "RESOURCES_DELETE";
 

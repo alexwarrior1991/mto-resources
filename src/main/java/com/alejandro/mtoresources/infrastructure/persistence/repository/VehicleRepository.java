@@ -26,6 +26,14 @@ public interface VehicleRepository extends JpaRepository<Vehicle, UUID>, JpaSpec
     @Query("select count(v) > 0 from Vehicle v where upper(v.railVehicleNumber) = upper(:number) and (:id is null or v.id <> :id)")
     boolean existsRailVehicleNumber(@Param("number") String number, @Param("id") UUID id);
 
+    @Query("select count(v) > 0 from Vehicle v where v.telematicsDeviceId = :deviceId and (:id is null or v.id <> :id)")
+    boolean existsTelematicsDevice(@Param("deviceId") String deviceId, @Param("id") UUID id);
+
+    /** El vehiculo de un dispositivo GPS, bloqueado: dos lotes del mismo dispositivo a la vez se ponen en fila. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select v from Vehicle v join fetch v.type where v.telematicsDeviceId = :deviceId")
+    Optional<Vehicle> findByTelematicsDeviceForUpdate(@Param("deviceId") String deviceId);
+
     @EntityGraph(attributePaths = "type")
     @Query("select v from Vehicle v where v.id in :ids")
     List<Vehicle> findAllWithType(@Param("ids") Collection<UUID> ids);

@@ -42,6 +42,7 @@ class VehicleDocumentServiceImpl implements VehicleDocumentService {
     private final VehicleRepository vehicleRepository;
     private final VehicleDocumentMapper mapper;
     private final DomainEventPublisher events;
+    private final Unavailability unavailability;
     private final Clock clock;
 
     @Override
@@ -119,7 +120,8 @@ class VehicleDocumentServiceImpl implements VehicleDocumentService {
      * {@code active: false}). Un documento no cambia si el vehiculo esta disponible.
      */
     private void publish(Vehicle vehicle) {
-        events.publish(ResourcesEvents.vehicle(vehicle, repository.findAllOfVehicle(vehicle.getId()), ResourcesEvents.UPDATED, false, false));
+        events.publish(ResourcesEvents.vehicle(vehicle, repository.findAllOfVehicle(vehicle.getId()),
+                unavailability.ofVehicle(vehicle.getId()), ResourcesEvents.UPDATED, false, false));
     }
 
     private static void requireDates(VehicleDocument document) {

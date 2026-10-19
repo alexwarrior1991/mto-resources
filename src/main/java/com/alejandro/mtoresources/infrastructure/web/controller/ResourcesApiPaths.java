@@ -11,9 +11,13 @@ public final class ResourcesApiPaths {
     public static final String PARKING_SITES = BASE + "/parking-sites";
     public static final String QUALIFICATION_TYPES = BASE + "/qualification-types";
     public static final String PERSON_QUALIFICATIONS = PEOPLE + "/{personId}/qualifications";
+    public static final String PERSON_ABSENCES = PEOPLE + "/{personId}/absences";
     public static final String VEHICLE_TYPES = BASE + "/vehicle-types";
     public static final String VEHICLES = BASE + "/vehicles";
     public static final String VEHICLE_DOCUMENTS = VEHICLES + "/{vehicleId}/documents";
+    public static final String VEHICLE_REPAIRS = VEHICLES + "/{vehicleId}/repairs";
+    public static final String TELEMATICS = BASE + "/telematics";
+    public static final String REPORTS = BASE + "/reports";
     public static final String INSTRUMENTS = BASE + "/instruments";
     public static final String TRACK_ACCESS_POINTS = BASE + "/track-access-points";
     public static final String OPERATIONS = BASE + "/operations";

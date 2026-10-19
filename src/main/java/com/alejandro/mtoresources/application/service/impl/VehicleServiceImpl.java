@@ -15,6 +15,7 @@ import com.alejandro.mtoresources.application.mapper.PageMapper;
 import com.alejandro.mtoresources.application.service.DomainEventPublisher;
 import com.alejandro.mtoresources.application.service.EntityAuditService;
 import com.alejandro.mtoresources.application.service.VehicleService;
+import com.alejandro.mtoresources.infrastructure.persistence.entity.RepairStatus;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Vehicle;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleCategory;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleMobility;
@@ -24,6 +25,7 @@ import com.alejandro.mtoresources.infrastructure.persistence.entity.VehiclePosit
 import com.alejandro.mtoresources.infrastructure.persistence.entity.VehicleType;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.VehicleDocumentRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.VehiclePositionRepository;
+import com.alejandro.mtoresources.infrastructure.persistence.repository.VehicleRepairRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.VehicleRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.repository.VehicleTypeRepository;
 import com.alejandro.mtoresources.infrastructure.persistence.specification.SpecificationUtils;
@@ -46,15 +48,17 @@ import java.util.UUID;
 class VehicleServiceImpl implements VehicleService {
 
     private static final Set<String> CLEARABLE = Set.of("name", "registrationPlate", "railVehicleNumber", "serialNumber",
-            "manufactureYear", "ownerCompany", "statusReason", "odometerKm", "engineHours", "notes");
+            "manufactureYear", "ownerCompany", "statusReason", "odometerKm", "engineHours", "notes", "telematicsDeviceId");
 
     private final VehicleRepository repository;
     private final VehicleTypeRepository typeRepository;
     private final VehiclePositionRepository positionRepository;
     private final VehicleDocumentRepository documents;
+    private final VehicleRepairRepository repairs;
     private final FleetResponses responses;
     private final EntityAuditService auditService;
     private final DomainEventPublisher events;
+    private final Unavailability unavailability;
 
     @Override
     @Transactional
@@ -78,12 +82,13 @@ class VehicleServiceImpl implements VehicleService {
                 .odometerKm(request.odometerKm())
                 .engineHours(request.engineHours())
                 .notes(SpecificationUtils.normalize(request.notes()))
+                .telematicsDeviceId(SpecificationUtils.normalize(request.telematicsDeviceId()))
                 .build();
         requireConsistent(vehicle);
 
         Vehicle saved = repository.saveAndFlush(vehicle);
         // Un vehiculo nuevo aun no tiene documentos: se dan despues, en /vehicles/{id}/documents.
-        events.publish(ResourcesEvents.vehicle(saved, List.of(), ResourcesEvents.CREATED));
+        events.publish(ResourcesEvents.vehicle(saved, List.of(), List.of(), ResourcesEvents.CREATED));
         return responses.vehicle(saved, null);
     }
 
@@ -119,6 +124,7 @@ class VehicleServiceImpl implements VehicleService {
         PatchRules.set(patch, "owner", values.owner(), vehicle::setOwner);
         PatchRules.set(patch, "ownerCompany", SpecificationUtils.normalize(values.ownerCompany()), vehicle::setOwnerCompany);
         if (values.operationalStatus() != null && values.operationalStatus() != vehicle.getOperationalStatus()) {
+            requireOutOfTheWorkshop(vehicle, values.operationalStatus());
             vehicle.setOperationalStatus(values.operationalStatus());
             // De vuelta a operativo sin motivo nuevo: el de la averia ya no aplica.
             if (values.operationalStatus() == VehicleOperationalStatus.OPERATIONAL && values.statusReason() == null) {
@@ -129,6 +135,7 @@ class VehicleServiceImpl implements VehicleService {
         PatchRules.set(patch, "odometerKm", values.odometerKm(), vehicle::setOdometerKm);
         PatchRules.set(patch, "engineHours", values.engineHours(), vehicle::setEngineHours);
         PatchRules.set(patch, "notes", SpecificationUtils.normalize(values.notes()), vehicle::setNotes);
+        PatchRules.set(patch, "telematicsDeviceId", SpecificationUtils.normalize(values.telematicsDeviceId()), vehicle::setTelematicsDeviceId);
         if (Boolean.TRUE.equals(values.active()) && !Boolean.TRUE.equals(vehicle.getActive())) {
             if (!Boolean.TRUE.equals(vehicle.getType().getActive())) {
                 throw new FleetRuleException("Vehicle type " + vehicle.getType().getCode() + " is retired: give the vehicle another one "
@@ -139,7 +146,7 @@ class VehicleServiceImpl implements VehicleService {
         requireConsistent(vehicle);
 
         Vehicle saved = repository.saveAndFlush(vehicle);
-        events.publish(ResourcesEvents.vehicle(saved, documents.findAllOfVehicle(id), ResourcesEvents.UPDATED,
+        events.publish(ResourcesEvents.vehicle(saved, documents.findAllOfVehicle(id), unavailability.ofVehicle(id), ResourcesEvents.UPDATED,
                 saved.isAvailable() != wasAvailable, false));
         return responses.vehicle(saved, positionRepository.findById(id).orElse(null));
     }
@@ -190,7 +197,8 @@ class VehicleServiceImpl implements VehicleService {
         boolean wasAvailable = vehicle.isAvailable();
         vehicle.setActive(false);
         Vehicle saved = repository.saveAndFlush(vehicle);
-        events.publish(ResourcesEvents.vehicle(saved, documents.findAllOfVehicle(saved.getId()), ResourcesEvents.DEACTIVATED,
+        events.publish(ResourcesEvents.vehicle(saved, documents.findAllOfVehicle(saved.getId()), unavailability.ofVehicle(saved.getId()),
+                ResourcesEvents.DEACTIVATED,
                 wasAvailable, false));
     }
 
@@ -234,6 +242,24 @@ class VehicleServiceImpl implements VehicleService {
         }
         if (vehicle.getRailVehicleNumber() != null && repository.existsRailVehicleNumber(vehicle.getRailVehicleNumber(), vehicle.getId())) {
             throw new DuplicateCodeException("Vehicle", "rail vehicle number", vehicle.getRailVehicleNumber());
+        }
+        if (vehicle.getTelematicsDeviceId() != null && repository.existsTelematicsDevice(vehicle.getTelematicsDeviceId(), vehicle.getId())) {
+            throw new DuplicateCodeException("Vehicle", "telematics device", vehicle.getTelematicsDeviceId());
+        }
+    }
+
+    /**
+     * La reparacion manda: con una abierta que lo inmoviliza, el vehiculo no vuelve a trabajar a mano. Se
+     * cierra (o se cancela) la reparacion, y eso lo devuelve.
+     */
+    private void requireOutOfTheWorkshop(Vehicle vehicle, VehicleOperationalStatus status) {
+        if (!status.canWork() || vehicle.getId() == null) {
+            return;
+        }
+        List<String> open = repairs.findImmobilisingCodes(vehicle.getId(), RepairStatus.OPEN, UUID.randomUUID());
+        if (!open.isEmpty()) {
+            throw new FleetRuleException("Vehicle " + vehicle.getCode() + " is in the workshop (repair " + String.join(", ", open)
+                    + "): close or cancel the repair to put it back to work");
         }
     }
 

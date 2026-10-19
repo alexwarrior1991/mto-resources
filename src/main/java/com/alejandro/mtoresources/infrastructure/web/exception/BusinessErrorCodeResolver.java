@@ -1,11 +1,14 @@
 package com.alejandro.mtoresources.infrastructure.web.exception;
 
+import com.alejandro.mtoresources.application.exception.AbsenceRuleException;
 import com.alejandro.mtoresources.application.exception.BusinessException;
 import com.alejandro.mtoresources.application.exception.DuplicateCodeException;
 import com.alejandro.mtoresources.application.exception.FleetRuleException;
+import com.alejandro.mtoresources.application.exception.KeycloakUnavailableException;
 import com.alejandro.mtoresources.application.exception.NotFoundException;
 import com.alejandro.mtoresources.application.exception.OrganizationRuleException;
 import com.alejandro.mtoresources.application.exception.QualificationRuleException;
+import com.alejandro.mtoresources.application.exception.RepairRuleException;
 import com.alejandro.mtoresources.application.exception.StaleVersionException;
 import com.alejandro.mtoresources.application.exception.TooManyOperationsException;
 import com.alejandro.mtoresources.application.exception.ValidationException;
@@ -26,6 +29,8 @@ final class BusinessErrorCodeResolver {
             Map.entry("Parking site", "PRK"),
             Map.entry("Qualification type", "QTY"),
             Map.entry("Person qualification", "QUA"),
+            Map.entry("Person absence", "ABS"),
+            Map.entry("Vehicle repair", "REP"),
             Map.entry("Vehicle document", "VDO"),
             Map.entry("Instrument", "INT"),
             Map.entry("Track access point", "TAP"),
@@ -42,6 +47,9 @@ final class BusinessErrorCodeResolver {
             case OrganizationRuleException ignored -> "UNI-001";
             case FleetRuleException ignored -> "VEH-001";
             case QualificationRuleException ignored -> "QUA-001";
+            case AbsenceRuleException ignored -> "ABS-001";
+            case RepairRuleException ignored -> "REP-001";
+            case KeycloakUnavailableException ignored -> "KCK-503";
             case TooManyOperationsException ignored -> "OPS-429";
             case StaleVersionException ignored -> "CON-001";
             case ValidationException ignored -> "VAL-001";
