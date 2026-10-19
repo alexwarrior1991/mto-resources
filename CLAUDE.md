@@ -13,7 +13,8 @@ works in one vehicle with one team leader, always, and 2 to 6 linemen**; the fle
 road-rail and road-only vehicles of a model, with where each one is at every moment, and the calibrated
 instruments. What expires (the qualifications of every person, the documents of every vehicle, the
 calibration of every instrument) is kept here with its dates and warned about every day; whether
-something expired enters a shift is decided by `mto-maintenance`.
+something expired enters a shift is decided by `mto-maintenance`. So is when someone or something is not
+available (the absences of a person, the repairs that immobilise a vehicle), which travels as periods.
 
 Read `docs/` in order: `00-project-overview.md` … `07-auditing.md`. Those documents plus this file are
 the source of truth; `03-database.md` documents the schema and should be checked before changing
@@ -21,10 +22,11 @@ persistence code.
 
 ⚠️ `mto-maintenance`, `mto-configuration` and the rest are **independent sibling repositories**. EP,
 track and station ids of `mto-configuration` are plain `bigint`s here, without a foreign key; of its
-masters only the track access points are kept, as a snapshot fed by its master-data channel. This
-service **calls nobody**: what it needs from `mto-maintenance` (where the vehicles of a shift went)
-arrives by RabbitMQ, and what `mto-maintenance` needs from here (teams, crews, vehicles) leaves by
-RabbitMQ. No service account.
+masters only the track access points are kept, as a snapshot fed by its master-data channel. What it
+needs from `mto-maintenance` (where the vehicles of a shift went) arrives by RabbitMQ, and what
+`mto-maintenance` needs from here (teams, crews, vehicles) leaves by RabbitMQ. **The only call it makes**
+is reading Keycloak for the discrepancy report (`KeycloakDirectory`, the read-only service account
+`mto-resources-svc`): it never writes the realm.
 
 ⚠️ The local infrastructure (PostgreSQL, RabbitMQ, Keycloak, the trace collector) is brought up by
 `mto-platform`. `compose.yaml` here holds **only the application**.
@@ -53,21 +55,29 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
 - `domain/model` — framework-free rules: `CrewComposition` (`MIN_LINEMEN = 2`, `MAX_LINEMEN = 6`;
   `mto-maintenance` keeps a copy for the crew of a shift), `OrganizationRules`, `FleetRules` (also the rules
   of a track access point, `accessPointViolation`), `ExpiryRules`
-  (expired from the day after the expiry date, the warning window, the default expiry of a type). They
-  return the reason instead of throwing: the caller decides 400 or 409.
+  (expired from the day after the expiry date, the warning window, the default expiry of a type),
+  `RepairRules` (the transitions of a repair, and when it leaves the vehicle unavailable) and
+  `UnavailablePeriod` (`{from, to}`, both included, `to` null without end). They return the reason instead
+  of throwing: the caller decides 400 or 409.
 - `application` — `dto` (one package per resource), `service` + `service/impl` (package-private impls;
   `OrganizationLookups` loads with its 404, walks the tree, locks teams in id order and republishes
-  them; `FleetResponses` builds the fleet answers; **`ResourcesEvents` is the event contract**),
+  them; `FleetResponses` builds the fleet answers; `Unavailability` gives the `unavailable` periods every
+  person and vehicle event carries; **`ResourcesEvents` is the event contract**),
   `mapper` (MapStruct, entity → response only; `OrganizationUnitResponse` and the fleet answers are
   built by hand because they carry what is computed), `exception`.
 - `infrastructure` — `persistence` (entities, repositories, specifications, Envers), `web` (controllers,
   merge-patch, `PreferHeader`/`OperationResponses`, the exception handler, `actuator/RepublishEndpoint`),
   `messaging/rabbitmq` (`MaintenanceEventConsumer`, `FieldEventConsumer`, `MasterDataEventConsumer`),
-  `messaging/outbox` (copy of `mto-configuration`'s).
+  `messaging/outbox` (copy of `mto-configuration`'s), `keycloak` (`RestClientKeycloakDirectory`: the Admin
+  API, paged, a missing role empty, anything else `KCK-503`).
 - `configuration` — security, `rabbitmq`, `messaging` (signature), `outbox`, `async` (virtual threads,
   `OperationsProperties`, the scheduler of the background operations), `expiry` (`ExpiryWatchProperties`,
   `app.resources.expiry.*`: `enabled`, `cron` in UTC, `warning-days` 30; the daily scheduler of
-  `ExpiryWatchService`, only with the broker on, off in `application-test.yml`), JPA auditing, OpenAPI, `Clock`.
+  `ExpiryWatchService`, only with the broker on, off in `application-test.yml`), `telematics`
+  (`TelematicsProperties`, `app.resources.telematics.min-interval`, 5 min), `keycloak`
+  (`KeycloakAdminProperties`, `app.keycloak.admin.*`, and the `RestClient` with the token of
+  `mto-resources-svc`, built here and not taken from the context, like the stock client of `mto-maintenance`;
+  off in the tests), JPA auditing, OpenAPI, `Clock`.
 
 ### Rules that must not be broken
 
@@ -108,6 +118,22 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
   `needsPreparedAccess`, and takes the model's `maxGrossT`/`maxAxleLoadT` (when both figures are known); an
   unknown one is 404 `TAP-404`. The answer keeps `accessPoint` as the free text and adds `trackAccessPoint
   {id, name, kind}` (a new key: a published key never changes type).
+- **When someone or something is not available travels as periods, never with its reason.** Every
+  `person.*` and `vehicle.*` carries `unavailable [{from, to}]`, from `Unavailability`: the absences of the
+  person (`person_absence`, `V11`) and the repairs that immobilise the vehicle, planned or open
+  (`vehicle_repair`, `V12`), that end today or later. Every publisher of those events asks it; one without
+  the list would tell the consumer there is nothing. Two absences of a person do not overlap (409
+  `ABS-001`, decided with the person row locked).
+- **The repair rules the status of the vehicle** (`VehicleRepairService`, the vehicle row locked): opening
+  one that immobilises puts a vehicle that could work `UNDER_REPAIR`; closing or cancelling the last open
+  one puts it back `OPERATIONAL` if it is still `UNDER_REPAIR`; putting it back to work by hand while one is
+  open is 409 `VEH-001`. `PLANNED -> OPEN -> CLOSED`, or `CANCELLED` (`RepairRules`, 409 `REP-001`); nothing is
+  deleted.
+- **A GPS moves only what it can see**: `POST /telematics/positions` records `ON_ROAD` with `source =
+  TELEMATICS` through `VehicleLocationService.record`, each position in its own transaction with the
+  vehicle row locked, at most one every `min-interval` per device, and ignores (with the reason, never
+  failing the batch) an unknown device, a retired, rail-only or attached vehicle, and one `ON_TRACK` in a
+  shift (`SHIFT`/`FIELD`).
 - **A model is coherent with its mobility** (`FleetRules.typeViolation`); a vehicle carries what its
   model needs (plate if it runs on the road, rail number if it may run on open track). A self-propelled
   model that does not say the qualification of its driver takes the one of its mobility
@@ -129,16 +155,17 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
 ### Security
 
 Resource server of the `mto` realm, audience `mto-resources-api`. Client roles `resources-read`,
-`resources-write` (people and their qualifications, units, linemen, parking sites, qualification types),
-`resources-fleet-write` (vehicles and their documents, models, instruments), `resources-location-write` (only `POST /vehicles/{id}/locations`), `resources-delete`
+`resources-write` (people and their qualifications and absences, units, linemen, parking sites, qualification types),
+`resources-fleet-write` (vehicles and their documents and repairs, models, instruments), `resources-location-write` (only `POST /vehicles/{id}/locations`),
+`resources-telematics-write` (only `POST /telematics/positions`, the service account `mto-telematics-svc`; no profile carries it), `resources-delete`
 (`DELETE`, and `PUT`/`PATCH` with `active=false` through `@PreAuthorize`), `ops-metrics`, `ops-write`;
 realm roles only as `ROLE_REALM_*`. No role implies another; anything undeclared under the API is
 denied. A new role goes to `SecurityRoles` **and** `keycloak/mto-resources-partial-import.json`.
 
 ### Messaging
 
-Publishes `person` (with all its `qualifications`), `team`, `vehicle` (with all its `documents` and the
-qualification its model asks of the driver) and `instrument` (`created`/`updated`/`deactivated`), and the
+Publishes `person` (with all its `qualifications` and its `unavailable` periods), `team`, `vehicle` (with
+all its `documents`, its `unavailable` periods and the qualification its model asks of the driver) and `instrument` (`created`/`updated`/`deactivated`), and the
 daily expiry warnings `qualification`, `vehicle-document` and `calibration` (`expiring`/`expired`), on
 `mto.resources.exchange` through the outbox, inside the business transaction; declares no queue (`mto-maintenance` and
 `mto-notification` declare theirs). What `republish` publishes carries `republished: true`, and a vehicle
@@ -170,7 +197,9 @@ codes because the database is shared (the expiry watcher, called by hand, sees e
 looks only at the events about its own ids). `DomainModelTest`, `ApiAuthorizationRulesTest` (probe controllers
 on the real routes, and the `@PreAuthorize` of every real `PUT`/`PATCH` whose body can say
 `active=false`), `SecurityLayerTest`, `MessagingLayerTest` (the consumer), `MessagingContractExamplesTest`,
-`JpaEntityModelTest`, `MtoResourcesApplicationTests` (the whole context with Tomcat, and that requests
+`JpaEntityModelTest`, `KeycloakClientTest` (the Admin API against a `MockRestServiceServer`: the pages, a
+missing role, `KCK-503`; in `BusinessLayerTest` the report runs on a `@Primary` `FakeKeycloakDirectory`),
+`MtoResourcesApplicationTests` (the whole context with Tomcat, and that requests
 and background work run on virtual threads) and the outbox's own tests under
 `infrastructure/messaging/outbox`. `support/PostgreSQLTestContainer` starts `postgres:17-alpine`, or uses
 `TEST_DATABASE_URL`/`TEST_DATABASE_USERNAME`/`TEST_DATABASE_PASSWORD`; without either the test is skipped.

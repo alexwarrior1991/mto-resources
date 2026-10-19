@@ -57,6 +57,8 @@ curl -X POST -H "Authorization: Bearer $CONFIG_TOKEN" \
 Everything is read from the environment; `.env.example` lists every variable with its default. The ones
 without a default: `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `KEYCLOAK_ISSUER_URI`,
 `KEYCLOAK_CLIENT_ID`, `KEYCLOAK_AUDIENCE` and, with RabbitMQ on, `SPRING_RABBITMQ_USERNAME`/`PASSWORD`.
+The discrepancy report reads Keycloak with `KEYCLOAK_SERVICE_CLIENT_SECRET` (the service account
+`mto-resources-svc`); without it, that report answers 503 `KCK-503` and everything else works.
 
 ## Tests
 

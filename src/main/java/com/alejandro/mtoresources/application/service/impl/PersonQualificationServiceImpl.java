@@ -45,6 +45,7 @@ class PersonQualificationServiceImpl implements PersonQualificationService {
     private final PersonRepository personRepository;
     private final PersonQualificationMapper mapper;
     private final DomainEventPublisher events;
+    private final Unavailability unavailability;
     private final Clock clock;
 
     @Override
@@ -133,7 +134,8 @@ class PersonQualificationServiceImpl implements PersonQualificationService {
      * {@code active: false}): un {@code deactivated} mas diria a quien avisa de bajas que se fue otra vez.
      */
     private void publish(Person person) {
-        events.publish(ResourcesEvents.person(person, repository.findAllOfPerson(person.getId()), ResourcesEvents.UPDATED));
+        events.publish(ResourcesEvents.person(person, repository.findAllOfPerson(person.getId()),
+                unavailability.ofPerson(person.getId()), ResourcesEvents.UPDATED));
     }
 
     private static void requireDates(PersonQualification qualification) {

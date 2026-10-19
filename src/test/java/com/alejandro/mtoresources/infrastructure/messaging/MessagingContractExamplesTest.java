@@ -4,6 +4,7 @@ import com.alejandro.mtoresources.application.dto.messaging.AsynchronousMessage;
 import com.alejandro.mtoresources.application.dto.messaging.DomainEvent;
 import com.alejandro.mtoresources.application.dto.messaging.MessageActor;
 import com.alejandro.mtoresources.application.service.impl.ResourcesEvents;
+import com.alejandro.mtoresources.domain.model.UnavailablePeriod;
 import com.alejandro.mtoresources.infrastructure.messaging.outbox.AsynchronousMessageFactory;
 import com.alejandro.mtoresources.infrastructure.messaging.outbox.AsynchronousMessageHashService;
 import com.alejandro.mtoresources.infrastructure.messaging.outbox.MessageContextResolver;
@@ -85,7 +86,7 @@ class MessagingContractExamplesTest {
     void personCreated() throws IOException {
         // Una persona nueva aun no tiene cualificaciones: se le dan despues.
         check("person-created.json", "b0000000-0000-4000-8000-000000000001", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.person(leader(), List.of(), ResourcesEvents.CREATED));
+                ResourcesEvents.person(leader(), List.of(), List.of(), ResourcesEvents.CREATED));
     }
 
     @Test
@@ -97,8 +98,10 @@ class MessagingContractExamplesTest {
         List<PersonQualification> qualifications = List.of(
                 qualification(person, railDriver(), "a1000000-0000-4000-8000-000000000001", LocalDate.parse("2027-03-31")),
                 qualification(person, licenceC(), "a1000000-0000-4000-8000-000000000002", LocalDate.parse("2031-06-14")));
+        // Cuando no esta: el periodo de una ausencia, nunca su clase.
+        List<UnavailablePeriod> unavailable = List.of(new UnavailablePeriod(LocalDate.parse("2026-11-02"), LocalDate.parse("2026-11-13")));
         check("person-updated.json", "b0000000-0000-4000-8000-000000000002", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.person(person, qualifications, ResourcesEvents.UPDATED));
+                ResourcesEvents.person(person, qualifications, unavailable, ResourcesEvents.UPDATED));
     }
 
     @Test
@@ -109,7 +112,7 @@ class MessagingContractExamplesTest {
         // Una que no caduca viaja con expiresOn nulo.
         check("person-deactivated.json", "b0000000-0000-4000-8000-000000000003", MANAGER, REQUEST_CORRELATION_ID,
                 ResourcesEvents.person(person, List.of(qualification(person, licenceB(), "a1000000-0000-4000-8000-000000000003", null)),
-                        ResourcesEvents.DEACTIVATED));
+                        List.of(), ResourcesEvents.DEACTIVATED));
     }
 
     // -------------------------------------------------------------------------------- teams
@@ -144,7 +147,7 @@ class MessagingContractExamplesTest {
     void vehicleCreated() throws IOException {
         // Un vehiculo nuevo aun no tiene documentos: se le dan despues.
         check("vehicle-created.json", "b0000000-0000-4000-8000-000000000007", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.vehicle(roadRail(), List.of(), ResourcesEvents.CREATED));
+                ResourcesEvents.vehicle(roadRail(), List.of(), List.of(), ResourcesEvents.CREATED));
     }
 
     @Test
@@ -155,8 +158,11 @@ class MessagingContractExamplesTest {
         ReflectionTestUtils.setField(vehicle, "version", 1L);
         // Pasa a reparacion: deja de estar disponible, y eso es lo que avisa mto-notification. Sus documentos
         // llegan en cualquier orden y viajan por tipo.
+        // En el taller con una reparacion abierta sin fecha de salida, y otra planificada mas adelante.
+        List<UnavailablePeriod> unavailable = List.of(new UnavailablePeriod(LocalDate.parse("2026-12-01"), LocalDate.parse("2026-12-03")),
+                new UnavailablePeriod(LocalDate.parse("2026-10-16"), null));
         check("vehicle-updated.json", "b0000000-0000-4000-8000-000000000008", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.vehicle(vehicle, documents(vehicle), ResourcesEvents.UPDATED, true, false));
+                ResourcesEvents.vehicle(vehicle, documents(vehicle), unavailable, ResourcesEvents.UPDATED, true, false));
     }
 
     @Test
@@ -165,7 +171,7 @@ class MessagingContractExamplesTest {
         vehicle.setActive(false);
         ReflectionTestUtils.setField(vehicle, "version", 2L);
         check("vehicle-deactivated.json", "b0000000-0000-4000-8000-000000000009", MANAGER, REQUEST_CORRELATION_ID,
-                ResourcesEvents.vehicle(vehicle, documents(vehicle), ResourcesEvents.DEACTIVATED, true, false));
+                ResourcesEvents.vehicle(vehicle, documents(vehicle), List.of(), ResourcesEvents.DEACTIVATED, true, false));
     }
 
     // -------------------------------------------------------------------------- instruments

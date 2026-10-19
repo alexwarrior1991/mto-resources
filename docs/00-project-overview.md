@@ -33,16 +33,20 @@ like the material is shared through `mto-stock`.
   organization tree. They are kept apart on purpose: a deputy may need the profile without changing
   position, and this service does not write the realm. `GET /me` (the units and EPs of the token's
   person) is the hook for the scope-by-EP permissions of a later phase.
-- **Not GPS.** A location is recorded by hand, derived from the shifts of `mto-maintenance`, and later
-  sent by the field devices (`FIELD`) and telematics (`TELEMATICS`); the source is already in the model.
-- **Not a caller.** It calls nobody: state travels by events in both directions. No service account.
+- **Not a tracker.** A location is recorded by hand, derived from the shifts of `mto-maintenance`, sent
+  by the field devices (`FIELD`) and, for the road and road-rail vehicles, by their GPS (`TELEMATICS`, at
+  most one every 5 minutes, and never over a shift that has the vehicle on the track).
+- **Hardly a caller.** State travels by events in both directions. The only call it makes is reading
+  Keycloak, with the read-only service account `mto-resources-svc`, for the report of position profiles
+  against categories.
 
 ## Neighbours
 
 | Service | Relation |
 |---|---|
-| `mto-maintenance` | Consumes `mto.resources.{person,team,vehicle,instrument}.*` (its teams, crews, vehicles and instruments, with their qualifications, documents and calibration: what is expired does not enter a shift); publishes `mto.maintenance.shift.*`, which moves the vehicles here. |
+| `mto-maintenance` | Consumes `mto.resources.{person,team,vehicle,instrument}.*` (its teams, crews, vehicles and instruments, with their qualifications, documents and calibration: what is expired does not enter a shift; and when each person and vehicle is not available, which does not either); publishes `mto.maintenance.shift.*`, which moves the vehicles here. |
 | `mto-notification` | Records every event of `mto.resources.#`, and warns of the expiries (`qualification.*`, `vehicle-document.*`, `calibration.*`). |
 | `mto-configuration` | EP, track and station ids are stored as plain `bigint`s, without a foreign key. Its track access points (`mto.master-data.track-access-point.*`) are kept as a snapshot, for the rules of on-tracking a road-rail vehicle. |
 | `mto-gateway` | `/api/resources/** → /api/v1/resources/**`. |
+| Keycloak | Read only, for the report of position profiles against categories (`mto-resources-svc`). The gateway of the GPS devices calls here with its own service account, `mto-telematics-svc`. |
 | `mto-platform` | Brings up PostgreSQL (`mto_resources`), RabbitMQ and Keycloak; applies `keycloak/`. |

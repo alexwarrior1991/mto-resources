@@ -62,6 +62,7 @@ class PersonServiceImpl implements PersonService {
     private final PersonMapper mapper;
     private final EntityAuditService auditService;
     private final DomainEventPublisher events;
+    private final Unavailability unavailability;
     private final CurrentUserService currentUser;
     private final Clock clock;
 
@@ -90,7 +91,7 @@ class PersonServiceImpl implements PersonService {
 
         Person saved = repository.saveAndFlush(person);
         // Una persona nueva aun no tiene cualificaciones: se dan despues, en /people/{id}/qualifications.
-        events.publish(ResourcesEvents.person(saved, List.of(), ResourcesEvents.CREATED));
+        events.publish(ResourcesEvents.person(saved, List.of(), List.of(), ResourcesEvents.CREATED));
         return mapper.toResponse(saved);
     }
 
@@ -143,7 +144,8 @@ class PersonServiceImpl implements PersonService {
         requireUnique(person.getId(), person.getUsername(), person.getEmployeeNumber(), person.getKeycloakUserId());
 
         Person saved = repository.saveAndFlush(person);
-        events.publish(ResourcesEvents.person(saved, qualifications.findAllOfPerson(saved.getId()), ResourcesEvents.UPDATED));
+        events.publish(ResourcesEvents.person(saved, qualifications.findAllOfPerson(saved.getId()),
+                unavailability.ofPerson(saved.getId()), ResourcesEvents.UPDATED));
         if (!before.equals(teamFacing(saved))) {
             lookups.publishActiveTeamsUpdated(teams);
         }
@@ -197,7 +199,8 @@ class PersonServiceImpl implements PersonService {
         }
         person.setActive(false);
         Person saved = repository.saveAndFlush(person);
-        events.publish(ResourcesEvents.person(saved, qualifications.findAllOfPerson(saved.getId()), ResourcesEvents.DEACTIVATED));
+        events.publish(ResourcesEvents.person(saved, qualifications.findAllOfPerson(saved.getId()),
+                unavailability.ofPerson(saved.getId()), ResourcesEvents.DEACTIVATED));
         lookups.publishActiveTeamsUpdated(teams);
     }
 

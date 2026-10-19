@@ -1,6 +1,7 @@
 # Only the application. PostgreSQL, RabbitMQ, Keycloak and the trace collector live in mto-platform,
-# which is the single shared local environment for the whole domain. This service calls nobody: what
-# it needs from mto-maintenance (where the vehicles of a shift went) arrives by RabbitMQ.
+# which is the single shared local environment for the whole domain. What it needs from mto-maintenance
+# (where the vehicles of a shift went) arrives by RabbitMQ; the only call it makes is reading Keycloak for
+# the discrepancy report, with the service account mto-resources-svc.
 #
 #   cd ../mto-platform && docker compose up -d     # infrastructure
 #   docker compose up -d --build                  # this service against it
@@ -50,6 +51,14 @@ services:
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:?KEYCLOAK_CLIENT_ID must be set}
       KEYCLOAK_AUDIENCE: ${KEYCLOAK_AUDIENCE:?KEYCLOAK_AUDIENCE must be set}
       KEYCLOAK_AUDIENCE_VALIDATION_ENABLED: ${KEYCLOAK_AUDIENCE_VALIDATION_ENABLED:-true}
+      # Reading Keycloak for GET /reports/position-discrepancies (read-only service account).
+      APP_KEYCLOAK_ADMIN_ENABLED: ${APP_KEYCLOAK_ADMIN_ENABLED:-true}
+      KEYCLOAK_AUTH_SERVER_URL: ${KEYCLOAK_AUTH_SERVER_URL:-http://auth.mto.local:8082}
+      KEYCLOAK_TOKEN_URI: ${KEYCLOAK_TOKEN_URI:-http://auth.mto.local:8082/realms/mto/protocol/openid-connect/token}
+      KEYCLOAK_SERVICE_CLIENT_ID: ${KEYCLOAK_SERVICE_CLIENT_ID:-mto-resources-svc}
+      KEYCLOAK_SERVICE_CLIENT_SECRET: ${KEYCLOAK_SERVICE_CLIENT_SECRET:-}
+      # GPS: at most one position recorded per device every this long.
+      APP_RESOURCES_TELEMATICS_MIN_INTERVAL: ${APP_RESOURCES_TELEMATICS_MIN_INTERVAL:-PT5M}
       APP_SECURITY_EXPOSE_API_DOCS: ${APP_SECURITY_EXPOSE_API_DOCS:-false}
       MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: ${MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:-health,info,metrics,prometheus,outbox,republish}
       MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: ${MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS:-never}

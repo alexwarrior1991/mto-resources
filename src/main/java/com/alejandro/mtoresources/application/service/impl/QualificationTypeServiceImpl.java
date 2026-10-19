@@ -13,6 +13,7 @@ import com.alejandro.mtoresources.application.mapper.PageMapper;
 import com.alejandro.mtoresources.application.mapper.QualificationTypeMapper;
 import com.alejandro.mtoresources.application.service.DomainEventPublisher;
 import com.alejandro.mtoresources.application.service.QualificationTypeService;
+import com.alejandro.mtoresources.domain.model.UnavailablePeriod;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.DrivingLicence;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.Person;
 import com.alejandro.mtoresources.infrastructure.persistence.entity.PersonQualification;
@@ -47,6 +48,7 @@ class QualificationTypeServiceImpl implements QualificationTypeService {
     private final PersonQualificationRepository qualificationRepository;
     private final QualificationTypeMapper mapper;
     private final DomainEventPublisher events;
+    private final Unavailability unavailability;
 
     @Override
     @Transactional
@@ -107,9 +109,10 @@ class QualificationTypeServiceImpl implements QualificationTypeService {
             Map<UUID, List<PersonQualification>> qualifications = qualificationRepository
                     .findAllOfPeople(holders.stream().map(Person::getId).toList()).stream()
                     .collect(Collectors.groupingBy(qualification -> qualification.getPerson().getId()));
+            Map<UUID, List<UnavailablePeriod>> unavailable = unavailability.ofPeople(holders.stream().map(Person::getId).toList());
             for (Person holder : holders) {
                 events.publish(ResourcesEvents.person(holder, qualifications.getOrDefault(holder.getId(), List.of()),
-                        ResourcesEvents.UPDATED));
+                        unavailable.getOrDefault(holder.getId(), List.of()), ResourcesEvents.UPDATED));
             }
         }
         return mapper.toResponse(saved);

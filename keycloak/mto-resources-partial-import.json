@@ -23,6 +23,10 @@
           "description": "Desactivar personas, unidades, vehiculos, modelos, sitios, tipos de cualificacion e instrumentos, y quitar cualificaciones y documentos (DELETE, o PUT/PATCH con active=false)"
         },
         {
+          "name": "resources-telematics-write",
+          "description": "Mandar las posiciones de los dispositivos GPS (solo POST /telematics/positions). Lo tiene la cuenta de servicio mto-telematics-svc, no una persona: ningun perfil lo lleva"
+        },
+        {
           "name": "ops-metrics",
           "description": "Lectura de los endpoints de Actuator de mto-resources"
         },
@@ -102,13 +106,47 @@
     {
       "clientId": "mto-resources-api",
       "name": "API de personal, organizacion y flota MTO",
-      "description": "Resource server. No inicia ningun flujo: existe para declarar los permisos como roles de cliente y para ser la audiencia de los tokens. mto-resources no llama a nadie, asi que no tiene cuenta de servicio.",
+      "description": "Resource server. No inicia ningun flujo: existe para declarar los permisos como roles de cliente y para ser la audiencia de los tokens. Las llamadas de mto-resources salen con su propia cuenta de servicio, mto-resources-svc.",
       "enabled": true,
       "publicClient": false,
       "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false
+    },
+    {
+      "clientId": "mto-resources-svc",
+      "name": "Cuenta de servicio de mto-resources",
+      "description": "Cuenta de servicio (client_credentials) con la que mto-resources lee de la Admin API quien tiene cada perfil de puesto, para el informe de discrepancias. Solo lee: view-users, query-users y view-realm de realm-management, que concede apply-partials.sh.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true
+    },
+    {
+      "clientId": "mto-telematics-svc",
+      "name": "Cuenta de servicio de la pasarela GPS",
+      "description": "Cuenta de servicio (client_credentials) con la que la pasarela de los dispositivos GPS manda sus posiciones a mto-resources (POST /telematics/positions). Su rol resources-telematics-write lo concede apply-partials.sh.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "audiencia-mto-resources-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "mto-resources-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
     }
   ]
 }

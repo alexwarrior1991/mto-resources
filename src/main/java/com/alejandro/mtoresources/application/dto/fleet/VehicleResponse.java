@@ -36,6 +36,7 @@ public record VehicleResponse(
         Integer odometerKm,
         BigDecimal engineHours,
         String notes,
+        String telematicsDeviceId,
         VehicleLocationResponse position,
         Boolean active,
         Long version,

@@ -2,8 +2,8 @@
 
 Estos ficheros son la definición de lo que `mto-resources` necesita en el servidor de identidad. Se
 versionan para que la configuración de Keycloak se revise en pull request como cualquier otro cambio,
-y para que los entornos no diverjan por lo que alguien pinchó un día en la consola. No hay ningún
-secreto: `mto-resources` no llama a nadie y no tiene cuenta de servicio.
+y para que los entornos no diverjan por lo que alguien pinchó un día en la consola. Los únicos secretos
+son los de desarrollo de sus dos cuentas de servicio, en `mto-resources-dev.json`.
 
 ## El realm es compartido
 
@@ -13,8 +13,8 @@ propio repositorio lo suyo. Este trae dos ficheros:
 
 | Fichero | Qué aporta |
 |---|---|
-| `mto-resources-partial-import.json` | El cliente `mto-resources-api`, sus permisos y los perfiles funcionales `mto-resources-*`. Vale para cualquier entorno. |
-| `mto-resources-dev.json` | Los usuarios de desarrollo, contraseña `local`: `recursos.lector`, `recursos.gestor` y `recursos.responsable`, con los perfiles de abajo, y uno por cada perfil de puesto (al final). Aparte a propósito, para poder aplicar lo anterior en un entorno desplegado sin arrastrarlos. |
+| `mto-resources-partial-import.json` | El cliente `mto-resources-api`, sus permisos y los perfiles funcionales `mto-resources-*`, y las dos cuentas de servicio: `mto-resources-svc` (lee de Keycloak quién tiene cada perfil de puesto, para el informe de discrepancias) y `mto-telematics-svc` (la pasarela de los GPS, que manda sus posiciones). Sus roles los concede `apply-partials.sh` de `mto-platform`. Vale para cualquier entorno. |
+| `mto-resources-dev.json` | Los secretos de desarrollo de las dos cuentas de servicio (`mto-resources-svc-secret`, `mto-telematics-svc-secret`) y los usuarios de desarrollo, contraseña `local`: `recursos.lector`, `recursos.gestor` y `recursos.responsable`, con los perfiles de abajo, y uno por cada perfil de puesto (al final). Aparte a propósito, para poder aplicar lo anterior en un entorno desplegado sin arrastrarlos. |
 
 Los aplica `mto-platform/keycloak/apply-partials.sh`, que fija el orden: primero las parciales que
 crean los clientes (la de `mto-notification` la primera, porque los perfiles de los demás nombran sus
@@ -35,10 +35,11 @@ Los **permisos** son roles de cliente de `mto-resources-api` y son lo que compru
 | Permiso | Concede |
 |---|---|
 | `resources-read` | Todo `GET`/`HEAD` bajo `/api/v1/resources` |
-| `resources-write` | Personas y sus cualificaciones, unidades del organigrama, linemen de los equipos, sitios de aparcamiento y tipos de cualificación |
-| `resources-fleet-write` | Modelos de vehículo, vehículos y sus documentos, e instrumentos |
+| `resources-write` | Personas, sus cualificaciones y sus ausencias, unidades del organigrama, linemen de los equipos, sitios de aparcamiento y tipos de cualificación |
+| `resources-fleet-write` | Modelos de vehículo, vehículos, sus documentos y su taller, e instrumentos |
 | `resources-location-write` | Solo `POST /vehicles/{id}/locations`: registrar dónde está un vehículo |
 | `resources-delete` | `DELETE`, y `PUT`/`PATCH` con `active=false` |
+| `resources-telematics-write` | Solo `POST /telematics/positions`: las posiciones de los GPS. Lo tiene la cuenta de servicio `mto-telematics-svc`; ningún perfil lo lleva |
 | `ops-metrics` | Lectura de los endpoints de Actuator |
 | `ops-write` | Operaciones de Actuator que modifican estado (`outbox`, `republish`) |
 

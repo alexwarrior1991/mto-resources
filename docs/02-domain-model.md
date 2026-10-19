@@ -33,6 +33,20 @@ keeps the deletion). An expiry date is the last day it is valid: it is **expired
 Who decides that something expired does not enter a shift is `mto-maintenance`, with what the events
 say: every person event carries all their qualifications, the expired ones too.
 
+## Absences
+
+`PersonAbsence` is when a person is not available: a kind (`VACATION`, `SICK_LEAVE`, `TRAINING`,
+`PERSONAL`, `OTHER`), `startsOn` and `endsOn` (both included, never the end before the start, 400) and
+notes. Two absences of the same person **do not overlap** (409 `ABS-001`; decided with the person row
+locked, the same lock as their qualifications). One recorded by mistake or called off is deleted (Envers
+keeps the deletion).
+
+**The kind never leaves this service.** Every person event carries `unavailable: [{from, to}]`, the
+periods of their absences that end today or later, and nothing else of them: a sick leave is nobody
+else's business, and `mto-notification` copies the `values` of an event into its log. `mto-maintenance`
+refuses a shift whose leader, supervisor or lineman is unavailable at its date. Every write of an absence
+publishes `person.updated` with the whole list.
+
 ## The organization tree
 
 `OrganizationUnit`: `PROJECT` (level 1) → `DEPARTMENT` (2) → `CHIEF_SUPERVISION` (3) → `SUPERVISION`
@@ -111,6 +125,32 @@ inspection, the insurance, the crane and the platform certificates, other. Each 
 renewing it is changing that date, and one given by mistake is deleted. An expired document does not
 change whether the vehicle is available: whether it enters a shift is for `mto-maintenance` to decide,
 with the documents every vehicle event carries.
+
+### The workshop
+
+`VehicleRepair` is a visit of a vehicle to the workshop: code (`REP-000001`, from a sequence), kind
+(`BREAKDOWN`, `SERVICE`, `INSPECTION`, `MODIFICATION`, `OTHER`), description, workshop, planned dates
+(`plannedFrom`, `plannedTo`), `openedAt`, `closedAt`, odometer, engine hours, cost and notes, and whether
+it **immobilises** the vehicle (by default yes). `PLANNED -> OPEN -> CLOSED`, or `CANCELLED` from either of
+the first two (`RepairRules`; another transition is 409 `REP-001`); nothing is deleted. A planned one says
+from when; the planned dates change while it is planned or open, and whether it immobilises only while
+planned.
+
+**The repair rules the status of the vehicle**, with the vehicle row locked:
+
+- opening one that immobilises puts a vehicle that could work (`OPERATIONAL`, `LIMITED`) `UNDER_REPAIR`,
+  with `Repair REP-…` as the reason;
+- closing or cancelling the last open one that immobilised it puts it back `OPERATIONAL` if it is still
+  `UNDER_REPAIR` (one put `OUT_OF_SERVICE` by hand is not touched);
+- while one is open, putting the vehicle back to work by hand (`OPERATIONAL`, `LIMITED`) is 409 `VEH-001`:
+  the repair is closed instead.
+
+Every vehicle event carries `unavailable: [{from, to}]`: the repairs that immobilise it, planned (from
+`plannedFrom` to `plannedTo`) or open (from the day it was opened to `plannedTo`, or without end when it
+does not say one or it already passed), that end today or later. `mto-maintenance` refuses a shift with a
+vehicle unavailable at its date, so a planned repair takes the vehicle out of the shifts of those days
+before it enters the workshop. Every write of a repair publishes `vehicle.updated`, with
+`availabilityChanged` when it moved the status.
 
 ## Instruments
 
@@ -215,3 +255,29 @@ a vehicle not in the fleet or retired, a position without a track or a shift, wh
 (a road vehicle is never on the track), and one of a shift that already left the track (its vehicle is
 `PARKED` or `UNKNOWN` by that same shift): `mto-field` stops publishing at the clear-of-track, and what
 arrives afterwards cannot put the vehicle back on the track.
+
+### Sent by the GPS devices
+
+A road or road-rail vehicle may have a GPS device (`telematicsDeviceId`, unique). The gateway of the
+devices (the service account `mto-telematics-svc`, role `resources-telematics-write`) sends batches to
+`POST /telematics/positions` (`{deviceId, observedAt, latitude, longitude}`, applied in order of
+`observedAt`, each in its own transaction with the vehicle row locked): each becomes `ON_ROAD` at those
+coordinates with `source = TELEMATICS` and the reference `telematics:<deviceId>`, through the same
+`VehicleLocationService.record`. At most one every `app.resources.telematics.min-interval` (5 minutes) per
+device: one sooner, or older than the last one, is ignored. Also ignored, with the reason in the answer
+(a batch never fails because of one position): an unknown device, a retired vehicle, a rail-only one (it
+is never on the road, and a GPS does not say on which track or kp), an attached one (it is where its
+carrier is) and one `ON_TRACK` in a shift (`SHIFT` or `FIELD`: until the shift closes, the shift says where
+it is).
+
+## Position profile and category
+
+Permission is not position, and the two can drift apart: a person whose category is `TEAM_LEADER` with the
+profile of a worker, or with none. `GET /reports/position-discrepancies` reads from Keycloak who holds each
+position profile directly (`mto-position-*`, the realm composites of `mto-platform`) and compares it with
+the category of every active person with a username: a profile that is not the one of their category,
+several, none (`CHIEF_CONSTRUCTION` has no profile yet: without one it is not a discrepancy), and users with
+a position profile and no active record here. It says, it does not fix: a stand-in may hold another
+profile on purpose. It is the only call this service makes, read-only, with the service account
+`mto-resources-svc` (`view-users`, `query-users` and `view-realm` of `realm-management`); Keycloak down,
+the account refused or `app.keycloak.admin.enabled=false` is 503 `KCK-503`.

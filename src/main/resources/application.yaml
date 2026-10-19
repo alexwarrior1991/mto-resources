@@ -20,12 +20,34 @@ spring:
       maximum-pool-size: ${DATABASE_POOL_MAX_SIZE:10}
   # La API es un resource server: no emite tokens ni guarda usuarios, solo valida los que emite
   # Keycloak. El JWK Set se descarga de forma perezosa, con lo que un Keycloak que aun no responde
-  # no impide arrancar. Este servicio no llama a nadie: no hay cuenta de servicio.
+  # no impide arrancar.
   security:
     oauth2:
       resourceserver:
         jwt:
           issuer-uri: ${KEYCLOAK_ISSUER_URI:http://auth.mto.local:8082/realms/mto}
+      # La unica llamada que sale de este servicio: leer de la Admin API de Keycloak quien tiene cada
+      # perfil de puesto, para el informe de discrepancias (app.keycloak.admin). Solo lee, con la cuenta de
+      # servicio mto-resources-svc. Secreto vacio por defecto: nadie pide un token hasta que se pide el
+      # informe, y la aplicacion arranca sin el.
+      client:
+        provider:
+          keycloak:
+            # token-uri en lugar de issuer-uri: el descubrimiento es una llamada HTTP al crear el bean, y
+            # la aplicacion no arrancaria sin Keycloak.
+            token-uri: ${KEYCLOAK_TOKEN_URI:http://auth.mto.local:8082/realms/mto/protocol/openid-connect/token}
+        registration:
+          mto-resources-svc:
+            provider: keycloak
+            client-id: ${KEYCLOAK_SERVICE_CLIENT_ID:mto-resources-svc}
+            client-secret: ${KEYCLOAK_SERVICE_CLIENT_SECRET:}
+            authorization-grant-type: client_credentials
+            client-authentication-method: client_secret_basic
+  # Timeouts del RestClient hacia Keycloak (el unico que hay). Claves en plural de Boot 4.1.
+  http:
+    clients:
+      connect-timeout: ${APP_KEYCLOAK_ADMIN_CONNECT_TIMEOUT:2s}
+      read-timeout: ${APP_KEYCLOAK_ADMIN_READ_TIMEOUT:10s}
 
   # Historial de cambios (Hibernate Envers), como en mto-maintenance.
   jpa:
@@ -226,3 +248,17 @@ app:
       enabled: ${APP_RESOURCES_EXPIRY_ENABLED:true}
       cron: "${APP_RESOURCES_EXPIRY_CRON:0 10 4 * * *}"
       warning-days: ${APP_RESOURCES_EXPIRY_WARNING_DAYS:30}
+    # Las posiciones de los GPS (POST /telematics/positions): como mucho una apuntada por dispositivo cada
+    # min-interval; lo que llega antes se ignora y se dice.
+    telematics:
+      min-interval: ${APP_RESOURCES_TELEMATICS_MIN_INTERVAL:PT5M}
+
+  # La lectura de Keycloak del informe de discrepancias (GET /reports/position-discrepancies), con la
+  # cuenta de servicio del registro mto-resources-svc de arriba. Con enabled=false el informe responde 503
+  # KCK-503 sin llamar a nadie.
+  keycloak:
+    admin:
+      enabled: ${APP_KEYCLOAK_ADMIN_ENABLED:true}
+      base-url: ${KEYCLOAK_AUTH_SERVER_URL:http://auth.mto.local:8082}
+      realm: ${KEYCLOAK_REALM:mto}
+      client-registration-id: mto-resources-svc

@@ -16,9 +16,9 @@ publisher confirms. With `app.rabbitmq.enabled=false` the publisher is the `NoOp
 
 | Event | `values` |
 |---|---|
-| `person.created`, `person.updated`, `person.deactivated` | `code`, `firstName`, `lastName`, `fullName`, `username`, `employeeNumber`, `category`, `employer`, `company`, `active`, `version`, `republished`, `qualifications` (all of them, the expired ones too, by `code`: `{code, kind, drivingLicence, expiresOn}`, `expiresOn` null when it does not expire). Never the phone. |
+| `person.created`, `person.updated`, `person.deactivated` | `code`, `firstName`, `lastName`, `fullName`, `username`, `employeeNumber`, `category`, `employer`, `company`, `active`, `version`, `republished`, `qualifications` (all of them, the expired ones too, by `code`: `{code, kind, drivingLicence, expiresOn}`, `expiresOn` null when it does not expire), `unavailable` (`[{from, to}]`, the periods of their absences that end today or later, both dates included; never their kind). Never the phone. |
 | `team.created`, `team.updated`, `team.deactivated` | `code`, `name`, `discipline`, `active`, `parentId`, `departmentId`, `executionPackageIds`, `defaultVehicle {id, code}`, `leader`, `supervisor` (head of the nearest supervision above), `chiefSupervisor`, `members` (each person as `{personId, code, fullName, username, category}`), `linemen`, `version`, `republished` |
-| `vehicle.created`, `vehicle.updated`, `vehicle.deactivated` | `code`, `name`, `type {id, code, name, mobility, category, selfPropelled, portable, seats, railGearType, transportModeAuthorised, capabilities, requiredDriverQualification}` (the code of the qualification its driver needs, or null), `registrationPlate`, `railVehicleNumber`, `operationalStatus`, `available`, `active`, `version`, `availabilityChanged`, `republished`, `documents` (all of them, the expired ones too, by `kind`: `{kind, reference, expiresOn}`) |
+| `vehicle.created`, `vehicle.updated`, `vehicle.deactivated` | `code`, `name`, `type {id, code, name, mobility, category, selfPropelled, portable, seats, railGearType, transportModeAuthorised, capabilities, requiredDriverQualification}` (the code of the qualification its driver needs, or null), `registrationPlate`, `railVehicleNumber`, `operationalStatus`, `available`, `active`, `version`, `availabilityChanged`, `republished`, `documents` (all of them, the expired ones too, by `kind`: `{kind, reference, expiresOn}`), `unavailable` (`[{from, to}]`, the repairs that immobilise it, planned or open, that end today or later; `to` null without a known end) |
 
 | `instrument.created`, `instrument.updated`, `instrument.deactivated` | `code`, `name`, `kind`, `serialNumber`, `calibratedOn`, `calibrationExpiresOn`, `active`, `version`, `republished`. `deactivated` once, when it is retired; a change to a retired one is `updated` |
 | `qualification.expiring`, `qualification.expired` | The id is the one of the `person_qualification` row. `personId`, `personCode`, `fullName`, `username`, `qualificationCode`, `qualificationName`, `kind`, `expiresOn`, `daysLeft` (negative once expired), `teamCode` (the open team of the person, as a lineman or as its leader, or null), `leader` (`{personId, code, fullName, username, category}` of that team's leader, or null; never the person themselves) |
@@ -49,9 +49,13 @@ example in the same commit (`MESSAGING_EXAMPLES_WRITE=true` regenerates them).
   vehicles; a qualification of a person (given, changed or removed) → that person, `person.updated` with
   the whole list (the person row is locked first, so the last event of a person carries every
   qualification); the kind or the licence of a qualification type → the people who hold it, locked in id
-  order; a document of a vehicle → that vehicle (`availabilityChanged=false`, the vehicle row locked first).
-- **A list travels whole**: `qualifications` (people) and `documents` (vehicles) are all of them, and an
-  event replaces the list the consumer had. An event without the key (an older `mto-resources`) says
+  order; a document of a vehicle → that vehicle (`availabilityChanged=false`, the vehicle row locked first);
+  an absence of a person → that person; a repair of a vehicle → that vehicle (with `availabilityChanged` when
+  opening or closing it moved its status), each row locked first.
+- **A list travels whole**: `qualifications` and `unavailable` (people), `documents` and `unavailable`
+  (vehicles) are all of them, and an event replaces the list the consumer had. `unavailable` only carries
+  what ends today or later: what is past drops out with the next event, and a consumer compares it with the
+  date of its shift anyway. An event without the key (an older `mto-resources`) says
   nothing about it.
 - **`updated` is an upsert**: `republish` publishes `updated` (or `deactivated`) of things the consumer
   may never have seen. What it publishes carries `republished: true` (everything else, `false`): a

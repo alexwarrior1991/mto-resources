@@ -21,6 +21,10 @@ public interface PersonRepository extends JpaRepository<Person, UUID>, JpaSpecif
     @Query(value = "select nextval('person_code_seq')", nativeQuery = true)
     long nextCodeValue();
 
+    /** Las que tienen usuario de Keycloak, activas o no: las que compara el informe de discrepancias. */
+    @Query("select p from Person p where p.username is not null order by p.code")
+    List<Person> findAllWithUsername();
+
     @Query("select p from Person p where lower(p.username) = lower(:username)")
     Optional<Person> findByUsernameIgnoreCase(@Param("username") String username);
 
