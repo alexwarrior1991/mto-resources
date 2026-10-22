@@ -59,6 +59,9 @@ without a default: `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `KE
 `KEYCLOAK_CLIENT_ID`, `KEYCLOAK_AUDIENCE` and, with RabbitMQ on, `SPRING_RABBITMQ_USERNAME`/`PASSWORD`.
 The discrepancy report reads Keycloak with `KEYCLOAK_SERVICE_CLIENT_SECRET` (the service account
 `mto-resources-svc`); without it, that report answers 503 `KCK-503` and everything else works.
+`APP_RABBITMQ_QUEUES_TYPE=quorum` declares the three queues it consumes and their DLQs as quorum, for a
+RabbitMQ cluster as on OpenShift (`classic` by default; an existing queue has to be deleted to change
+type; `APP_RABBITMQ_QUEUES_DELIVERY_LIMIT`, `5`, the unacknowledged deliveries before the DLQ).
 
 ## Tests
 

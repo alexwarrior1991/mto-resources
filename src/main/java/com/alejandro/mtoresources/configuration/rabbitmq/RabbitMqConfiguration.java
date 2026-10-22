@@ -4,7 +4,6 @@ import com.alejandro.mtoresources.application.service.IncomingEventProcessor;
 import com.alejandro.mtoresources.configuration.messaging.MessagePayloadSignatureVerifier;
 import com.alejandro.mtoresources.infrastructure.messaging.rabbitmq.FieldEventConsumer;
 import com.alejandro.mtoresources.infrastructure.messaging.rabbitmq.MaintenanceEventConsumer;
-import com.alejandro.mtoresources.infrastructure.messaging.rabbitmq.MaintenanceRabbitMqNames;
 import com.alejandro.mtoresources.infrastructure.messaging.rabbitmq.MasterDataEventConsumer;
 import com.alejandro.mtoresources.infrastructure.messaging.rabbitmq.RabbitListenerContainerFactoryNames;
 import lombok.RequiredArgsConstructor;
@@ -14,7 +13,6 @@ import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.DirectExchange;
 import org.springframework.amqp.core.Queue;
-import org.springframework.amqp.core.QueueBuilder;
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
@@ -53,7 +51,7 @@ import tools.jackson.databind.json.JsonMapper;
 @Configuration
 @RequiredArgsConstructor
 @EnableConfigurationProperties({MaintenanceRabbitProperties.class, FieldRabbitProperties.class, MasterDataRabbitProperties.class,
-        ResourcesEventsProperties.class})
+        ResourcesEventsProperties.class, ConsumerQueueProperties.class})
 @ConditionalOnProperty(prefix = "app.rabbitmq", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class RabbitMqConfiguration {
 
@@ -63,6 +61,8 @@ public class RabbitMqConfiguration {
     private final FieldRabbitProperties fieldProperties;
     private final MasterDataRabbitProperties masterDataProperties;
     private final ResourcesEventsProperties eventsProperties;
+    /** Clásicas o quorum, las tres colas que consume y sus DLQ. */
+    private final ConsumerQueueProperties queues;
 
     /**
      * Exchange propio: lo que este servicio cuenta de sí mismo, con la clave
@@ -91,10 +91,7 @@ public class RabbitMqConfiguration {
      */
     @Bean
     public Queue maintenanceQueue() {
-        return QueueBuilder.durable(properties.queue())
-                .withArgument(MaintenanceRabbitMqNames.ARG_DEAD_LETTER_EXCHANGE, properties.deadLetterExchange())
-                .withArgument(MaintenanceRabbitMqNames.ARG_DEAD_LETTER_ROUTING_KEY, properties.deadLetterRoutingKey())
-                .build();
+        return queues.queue(properties.queue(), properties.deadLetterExchange(), properties.deadLetterRoutingKey());
     }
 
     @Bean
@@ -113,7 +110,7 @@ public class RabbitMqConfiguration {
 
     @Bean
     public Queue maintenanceDeadLetterQueue() {
-        return QueueBuilder.durable(properties.deadLetterQueue()).build();
+        return queues.deadLetterQueue(properties.deadLetterQueue());
     }
 
     @Bean
@@ -206,10 +203,7 @@ public class RabbitMqConfiguration {
 
     @Bean
     public Queue fieldQueue() {
-        return QueueBuilder.durable(fieldProperties.queue())
-                .withArgument(MaintenanceRabbitMqNames.ARG_DEAD_LETTER_EXCHANGE, fieldProperties.deadLetterExchange())
-                .withArgument(MaintenanceRabbitMqNames.ARG_DEAD_LETTER_ROUTING_KEY, fieldProperties.deadLetterRoutingKey())
-                .build();
+        return queues.queue(fieldProperties.queue(), fieldProperties.deadLetterExchange(), fieldProperties.deadLetterRoutingKey());
     }
 
     @Bean
@@ -224,7 +218,7 @@ public class RabbitMqConfiguration {
 
     @Bean
     public Queue fieldDeadLetterQueue() {
-        return QueueBuilder.durable(fieldProperties.deadLetterQueue()).build();
+        return queues.deadLetterQueue(fieldProperties.deadLetterQueue());
     }
 
     @Bean
@@ -248,10 +242,7 @@ public class RabbitMqConfiguration {
 
     @Bean
     public Queue masterDataQueue() {
-        return QueueBuilder.durable(masterDataProperties.queue())
-                .withArgument(MaintenanceRabbitMqNames.ARG_DEAD_LETTER_EXCHANGE, masterDataProperties.deadLetterExchange())
-                .withArgument(MaintenanceRabbitMqNames.ARG_DEAD_LETTER_ROUTING_KEY, masterDataProperties.deadLetterRoutingKey())
-                .build();
+        return queues.queue(masterDataProperties.queue(), masterDataProperties.deadLetterExchange(), masterDataProperties.deadLetterRoutingKey());
     }
 
     @Bean
@@ -266,7 +257,7 @@ public class RabbitMqConfiguration {
 
     @Bean
     public Queue masterDataDeadLetterQueue() {
-        return QueueBuilder.durable(masterDataProperties.deadLetterQueue()).build();
+        return queues.deadLetterQueue(masterDataProperties.deadLetterQueue());
     }
 
     @Bean
