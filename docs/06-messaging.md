@@ -74,6 +74,20 @@ example in the same commit (`MESSAGING_EXAMPLES_WRITE=true` regenerates them).
   (also after `V8`: the people, vehicles and instruments a consumer has do not carry qualifications,
   documents, the driver qualification of their model nor the instruments until they are republished).
 
+## The queues it consumes: classic or quorum
+
+The three queues below (shifts, positions, track access points) and their DLQs are of the type
+`app.rabbitmq.queues.type` says (`ConsumerQueueProperties`): `classic` by default and locally (one broker
+node), `quorum` where RabbitMQ runs as a cluster, as on OpenShift (`APP_RABBITMQ_QUEUES_TYPE=quorum`), so
+that a queue survives the loss of a node. With `classic` they are declared exactly as before, without
+`x-queue-type`: adding the argument to a queue that already exists would be another declaration and the
+broker would refuse it. A quorum queue carries `x-delivery-limit` (`app.rabbitmq.queues.delivery-limit`,
+5): nothing rejected is requeued here (the retries happen inside one delivery and then the message goes to
+the DLQ), so the broker's count only grows when a message comes back unacknowledged because the consumer
+died or lost its connection; five lets a couple of ordinary restarts through and stops the message that
+kills the consumer every time. The DLQs are quorum too, without a limit. Changing the type of an existing
+queue means deleting it first (stop the consumer, let it drain, delete, redeploy).
+
 ## Consumed: the shifts of `mto-maintenance`
 
 Queue `mto.resources.maintenance.queue` (declared here, with its DLX `...queue.dlx` and DLQ

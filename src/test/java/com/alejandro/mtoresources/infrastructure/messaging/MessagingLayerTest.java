@@ -14,6 +14,7 @@ import com.alejandro.mtoresources.configuration.expiry.ExpiryWatchProperties;
 import com.alejandro.mtoresources.configuration.messaging.MessagePayloadSignatureVerifier;
 import com.alejandro.mtoresources.configuration.messaging.MessageSignatureMode;
 import com.alejandro.mtoresources.configuration.messaging.MessageSignatureProperties;
+import com.alejandro.mtoresources.configuration.rabbitmq.ConsumerQueueProperties;
 import com.alejandro.mtoresources.configuration.rabbitmq.FieldRabbitProperties;
 import com.alejandro.mtoresources.configuration.rabbitmq.MaintenanceRabbitProperties;
 import com.alejandro.mtoresources.configuration.rabbitmq.MasterDataRabbitProperties;
@@ -41,6 +42,7 @@ import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -100,6 +102,53 @@ class MessagingLayerTest {
         ArgumentCaptor<InboxMessageCommand> command = ArgumentCaptor.forClass(InboxMessageCommand.class);
         verify(processor).process(command.capture(), any());
         assertEquals("mto-field", command.getValue().sourceService());
+    }
+
+    /**
+     * Sin decir nada, las tres colas (turnos, posiciones y puntos de acceso) y sus DLQ se declaran
+     * exactamente como antes: clasicas, sin {@code x-queue-type} ni {@code x-delivery-limit}. Un argumento de mas
+     * haria que el broker rechazase la redeclaracion de una cola ya creada y se cayese toda la topologia.
+     */
+    @Test
+    void byDefaultTheThreeQueuesAndTheirDeadLettersAreClassicAndDeclaredAsBefore() {
+        RabbitMqConfiguration topology = topology();
+
+        assertEquals(Map.of(MaintenanceRabbitMqNames.ARG_DEAD_LETTER_EXCHANGE, "mto.resources.maintenance.queue.dlx",
+                        MaintenanceRabbitMqNames.ARG_DEAD_LETTER_ROUTING_KEY, "mto.resources.maintenance.queue.dlq"),
+                topology.maintenanceQueue().getArguments());
+        assertEquals(Map.of(MaintenanceRabbitMqNames.ARG_DEAD_LETTER_EXCHANGE, "mto.resources.field.queue.dlx",
+                        MaintenanceRabbitMqNames.ARG_DEAD_LETTER_ROUTING_KEY, "mto.resources.field.queue.dlq"),
+                topology.fieldQueue().getArguments());
+        assertEquals(Map.of(MaintenanceRabbitMqNames.ARG_DEAD_LETTER_EXCHANGE, "mto.resources.master-data.queue.dlx",
+                        MaintenanceRabbitMqNames.ARG_DEAD_LETTER_ROUTING_KEY, "mto.resources.master-data.queue.dlq"),
+                topology.masterDataQueue().getArguments());
+        for (org.springframework.amqp.core.Queue deadLetters : List.of(topology.maintenanceDeadLetterQueue(),
+                topology.fieldDeadLetterQueue(), topology.masterDataDeadLetterQueue())) {
+            assertEquals(Map.of(), deadLetters.getArguments(), deadLetters.getName());
+        }
+    }
+
+    /**
+     * Con {@code app.rabbitmq.queues.type=quorum}, que es como corre en OpenShift, las tres colas son quorum con su
+     * limite de entregas (5, o el que se diga) y sus DLQ tambien, sin limite; un limite por debajo de 1 no vale.
+     */
+    @Test
+    void withQuorumTheThreeQueuesCarryTheirDeliveryLimitAndTheirDeadLettersAreQuorumToo() {
+        RabbitMqConfiguration topology = topology(new ConsumerQueueProperties(ConsumerQueueProperties.QueueType.QUORUM, null));
+
+        for (org.springframework.amqp.core.Queue queue : List.of(topology.maintenanceQueue(), topology.fieldQueue(),
+                topology.masterDataQueue())) {
+            assertEquals("quorum", queue.getArguments().get("x-queue-type"), queue.getName());
+            assertEquals(ConsumerQueueProperties.DEFAULT_DELIVERY_LIMIT, queue.getArguments().get("x-delivery-limit"), queue.getName());
+            assertEquals(queue.getName() + ".dlx", queue.getArguments().get(MaintenanceRabbitMqNames.ARG_DEAD_LETTER_EXCHANGE));
+        }
+        for (org.springframework.amqp.core.Queue deadLetters : List.of(topology.maintenanceDeadLetterQueue(),
+                topology.fieldDeadLetterQueue(), topology.masterDataDeadLetterQueue())) {
+            assertEquals(Map.of("x-queue-type", "quorum"), deadLetters.getArguments(), deadLetters.getName());
+        }
+        assertEquals(3, topology(new ConsumerQueueProperties(ConsumerQueueProperties.QueueType.QUORUM, 3))
+                .fieldQueue().getArguments().get("x-delivery-limit"));
+        assertThrows(IllegalArgumentException.class, () -> new ConsumerQueueProperties(ConsumerQueueProperties.QueueType.QUORUM, 0));
     }
 
     /** La cola de las posiciones es de este servicio, atada al exchange de telemetria de mto-field (no al de sus eventos) y con su descarte. */
@@ -250,9 +299,13 @@ class MessagingLayerTest {
     }
 
     private static RabbitMqConfiguration topology() {
+        return topology(new ConsumerQueueProperties(null, null));
+    }
+
+    private static RabbitMqConfiguration topology(ConsumerQueueProperties queues) {
         return new RabbitMqConfiguration(new MaintenanceRabbitProperties(null, null, null, null, null, null),
                 new FieldRabbitProperties(null, null, null, null, null, null), new MasterDataRabbitProperties(null, null, null, null, null, null),
-                new ResourcesEventsProperties(null));
+                new ResourcesEventsProperties(null), queues);
     }
 
     private static MasterDataChangedMessage masterDataMessage(String origin, MasterDataChangedEvent event) {

@@ -153,6 +153,13 @@ app:
   rabbitmq:
     # Apaga la topologia, el consumidor y el outbox: la aplicacion arranca sin broker.
     enabled: ${APP_RABBITMQ_ENABLED:true}
+    # Tipo de las tres colas que consume este servicio y de sus DLQ: classic, por defecto y en local, o
+    # quorum, replicada entre los nodos de un RabbitMQ en cluster, como en OpenShift. El tipo de una
+    # cola que ya existe no cambia: hay que borrarla antes. delivery-limit solo cuenta con quorum (ver
+    # ConsumerQueueProperties).
+    queues:
+      type: ${APP_RABBITMQ_QUEUES_TYPE:classic}
+      delivery-limit: ${APP_RABBITMQ_QUEUES_DELIVERY_LIMIT:5}
     # Lo que se escucha de mto-maintenance: sus turnos. El exchange y la clave son contrato del
     # emisor; la cola y su DLQ son de este servicio.
     maintenance:

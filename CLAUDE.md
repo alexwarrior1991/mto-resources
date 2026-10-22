@@ -170,7 +170,10 @@ daily expiry warnings `qualification`, `vehicle-document` and `calibration` (`ex
 `mto.resources.exchange` through the outbox, inside the business transaction; declares no queue (`mto-maintenance` and
 `mto-notification` declare theirs). What `republish` publishes carries `republished: true`, and a vehicle
 event says whether that change moved its availability (`availabilityChanged`): `mto-notification` notices
-people of changes, not of republications nor of every note. Consumes
+people of changes, not of republications nor of every note. Its three consumer queues and their DLQs
+are `classic` by default and `quorum` with `app.rabbitmq.queues.type`, as on OpenShift, with
+`x-delivery-limit` 5 (`ConsumerQueueProperties`, which declares them exactly as before when `classic`,
+because a new argument on an existing queue is refused by the broker). Consumes
 `mto.maintenance.shift.*` on its own queue `mto.resources.maintenance.queue` (DLX/DLQ) through the
 idempotent inbox, and the positions of the field devices (`mto.field.position.*` on
 `mto.field.telemetry.exchange`, queue `mto.resources.field.queue`, `FieldPositionHandler`): `ON_TRACK` with
