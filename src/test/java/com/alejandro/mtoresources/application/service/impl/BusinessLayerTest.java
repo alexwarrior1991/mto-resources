@@ -124,6 +124,8 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -155,6 +157,7 @@ import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -261,6 +264,8 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
     private PositionDiscrepancyService discrepancies;
     @Autowired
     private FakeKeycloakDirectory directory;
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     /** Una persona autenticada, como en una peticion: lo que se escribe lleva su nombre y no {@code unknown}. */
     @BeforeEach
@@ -405,6 +410,73 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
                 List.of(leaderA.id(), person(PersonCategory.WORKER).id()), Set.of())), "Leads A");
         assertThrows(OrganizationRuleException.class, () -> units.create(teamRequest(supervision, leaderA.id(), linemen(2), Set.of())),
                 "A team leader leads one team");
+    }
+
+    /**
+     * La carrera que los indices unicos no ven, porque son dos equipos y dos papeles: a la vez, la misma
+     * persona pasa a jefe del equipo X y entra de lineman en el Y. Otra transaccion retiene la fila de la
+     * persona hasta que las dos peticiones la esperan (cada una con su equipo ya bloqueado): al soltarla,
+     * la primera confirma y la segunda lee lo que dejo.
+     */
+    @Test
+    void leadingOneTeamAndJoiningAnotherAtTheSameTimeLetsOnlyOneThrough() throws Exception {
+        UUID supervision = supervision(Set.of()).id();
+        OrganizationUnitResponse teamX = team(supervision, person(PersonCategory.TEAM_LEADER).id(), linemen(2), Set.of());
+        OrganizationUnitResponse teamY = team(supervision, person(PersonCategory.TEAM_LEADER).id(), linemen(2), Set.of());
+        PersonResponse contested = person(PersonCategory.TEAM_LEADER);
+
+        CountDownLatch holding = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger holderPid = new AtomicInteger();
+        List<Future<OrganizationUnitResponse>> attempts = new ArrayList<>();
+        try (ExecutorService threads = Executors.newVirtualThreadPerTaskExecutor()) {
+            Future<?> holder = threads.submit(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                holderPid.set(jdbc.queryForObject("select pg_backend_pid() from person where id = ? for update", Integer.class,
+                        contested.id()));
+                holding.countDown();
+                await(release);
+            }));
+            try {
+                await(holding);
+                attempts.add(threads.submit(() -> {
+                    authenticateAs("recursos.gestor");
+                    return units.patch(teamX.id(), MergePatch.of(updateRequest(null, contested.id(), null)));
+                }));
+                attempts.add(threads.submit(() -> {
+                    authenticateAs("recursos.gestor");
+                    return units.addMember(teamY.id(), new TeamMemberRequest(contested.id(), null));
+                }));
+                // Las dos esperan: una a quien retiene la fila, y la otra a esa o a la que ya hace cola por la fila.
+                waitUntil(() -> jdbc.queryForObject("""
+                        select count(*) from pg_stat_activity a
+                        where ? = any(pg_blocking_pids(a.pid))
+                           or exists (select 1 from unnest(pg_blocking_pids(a.pid)) blocker where ? = any(pg_blocking_pids(blocker)))
+                        """, Integer.class, holderPid.get(), holderPid.get()) == 2);
+            } finally {
+                release.countDown();
+            }
+            holder.get(20, TimeUnit.SECONDS);
+        }
+
+        List<OrganizationUnitResponse> accepted = new ArrayList<>();
+        List<Throwable> refused = new ArrayList<>();
+        for (Future<OrganizationUnitResponse> attempt : attempts) {
+            try {
+                accepted.add(attempt.get());
+            } catch (java.util.concurrent.ExecutionException failed) {
+                refused.add(failed.getCause());
+            }
+        }
+        assertEquals(1, accepted.size(), "Exactly one of the two goes through: " + refused);
+        assertEquals(1, refused.size());
+        OrganizationRuleException rule = assertInstanceOf(OrganizationRuleException.class, refused.getFirst());
+        var response = new GlobalExceptionHandler().handleStateConflict(rule, new MockHttpServletRequest());
+        assertEquals(409, response.getStatusCode().value());
+        assertEquals("UNI-001", response.getBody().errorCode());
+
+        boolean leadsX = contested.id().equals(units.findById(teamX.id()).head().id());
+        boolean ridesInY = units.members(teamY.id(), false).stream().anyMatch(member -> member.person().id().equals(contested.id()));
+        assertTrue(leadsX ^ ridesInY, "Leader of X or lineman of Y, never both: leads X " + leadsX + ", rides in Y " + ridesInY);
     }
 
     @Test

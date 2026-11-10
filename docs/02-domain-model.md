@@ -82,7 +82,8 @@ with their EPs, `mto-maintenance` adopts its own teams by code.
 
 A lineman is a `WORKER` or a `TEAM_LEADER` (a leader may go as lineman with another), never the leader
 of the same team. A person is an open lineman of one team at most (partial unique index), leads one
-active team at most (partial unique index), and is never both. A membership is never deleted: it is
+active team at most (partial unique index), and is never both (checked with the person row locked: the
+two teams are different rows and no index spans both roles). A membership is never deleted: it is
 closed with its `leftOn`, and the history of a team is its rows.
 
 ## The fleet
