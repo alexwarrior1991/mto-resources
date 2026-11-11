@@ -87,6 +87,13 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
   with the team row locked. A lineman is a `WORKER` or a `TEAM_LEADER`, never the leader of the same
   team; a person is an open lineman of one team and leads one active team at most (partial unique
   indexes) and is never both. A deactivated team releases its linemen and comes back with new ones.
+- **Whoever is given a team (as its leader or as a lineman) is locked first, after the units.** "Never
+  both" is checked between two different teams and no index covers it, so every path that assigns a head
+  or linemen (creating a unit, a new head, `POST`/`PUT /members`, reactivating a team) locks those person
+  rows in id order (`OrganizationLookups.lockPeople`) before reading their other role. **The lock order is
+  one for the whole service: units first (the one being changed, then teams in id order, `lockTeams`),
+  people after, in id order** (`lockPeople`, or `findByIdForUpdate` for a single one, as `PersonService.patch`,
+  the qualifications and the absences do). Never a unit with a person already locked.
 - **Every transaction that publishes a `team.updated` locks those team rows in id order first**
   (`OrganizationLookups.lockTeams`), before building the view; the same for the vehicles of a model, for
   the people who hold a qualification type, for the person whose qualifications change and the vehicle

@@ -41,6 +41,12 @@ The crew limits (2 to 6 linemen) are counted by the service with the team row lo
 (`SELECT ... FOR UPDATE`), not by a constraint: a team is allowed to be below 2 for the instant of a
 `PUT /members` inside its transaction.
 
+"A person leads one active team or is an open lineman of one, never both" is not a constraint either:
+each role has its partial unique index, the two together have none, and the two teams are different rows.
+The service checks it with the **person row locked** (`OrganizationLookups.lockPeople`) in every path that
+gives a unit its head or a team its linemen. Lock order, the same everywhere: units first (the one being
+changed, then teams in id order), people after, in id order.
+
 ## Fleet (`V6`)
 
 | Table | Key columns | Constraints and indexes |

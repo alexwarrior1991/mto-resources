@@ -83,6 +83,8 @@ class OrganizationUnitServiceImpl implements OrganizationUnitService {
         requireParent(kind, parent);
         WorkDiscipline discipline = discipline(kind, request.discipline(), parent);
 
+        // El equipo aun no tiene fila que bloquear; su jefe y sus linemen si (OrganizationLookups, orden de bloqueo).
+        lookups.lockPeople(people(request.headPersonId(), request.memberPersonIds()));
         Person head = request.headPersonId() == null ? null : lookups.person(request.headPersonId());
         boolean team = kind == OrganizationUnitKind.TEAM;
         if (team && head == null) {
@@ -163,6 +165,12 @@ class OrganizationUnitServiceImpl implements OrganizationUnitService {
             affected.addAll(lookups.teamsUnder(List.of(unit.getId())));
         }
         List<OrganizationUnit> teams = lookups.lockTeams(affected);
+        // Despues de los equipos, las personas a las que se da un papel: el jefe nuevo y, si un equipo
+        // vuelve, su jefe de siempre y sus linemen nuevos (OrganizationLookups, orden de bloqueo).
+        boolean teamReturns = reactivating && unit.isTeam();
+        lookups.lockPeople(people(
+                headChanges ? values.headPersonId() : teamReturns && unit.getHead() != null ? unit.getHead().getId() : null,
+                teamReturns ? values.memberPersonIds() : null));
 
         if (values.name() != null) {
             unit.setName(PatchRules.requireText(values.name(), "name"));
@@ -284,6 +292,7 @@ class OrganizationUnitServiceImpl implements OrganizationUnitService {
         CrewComposition.completeViolation(label, team.getHead() != null, request.memberPersonIds().size()).ifPresent(reason -> {
             throw new ValidationException(reason);
         });
+        lookups.lockPeople(request.memberPersonIds());
         LocalDate date = request.effectiveOn() == null ? LocalDate.now(clock) : request.effectiveOn();
         List<TeamMember> current = memberRepository.findOpenByTeam(teamId);
         Set<UUID> currentIds = new HashSet<>();
@@ -309,6 +318,7 @@ class OrganizationUnitServiceImpl implements OrganizationUnitService {
     public OrganizationUnitResponse addMember(UUID teamId, TeamMemberRequest request) {
         OrganizationUnit team = activeTeam(teamId);
         String label = "Team " + team.getCode();
+        lookups.lockPeople(List.of(request.personId()));
         CrewComposition.addViolation(label, memberRepository.countOpenByTeam(teamId)).ifPresent(reason -> {
             throw new OrganizationRuleException(reason);
         });
@@ -343,10 +353,24 @@ class OrganizationUnitServiceImpl implements OrganizationUnitService {
         member.setLeftOn(leftOn);
     }
 
+    /** El jefe y los linemen que se van a asignar, juntos: se bloquean de una vez, en orden de id. */
+    private static Set<UUID> people(UUID headPersonId, Collection<UUID> memberPersonIds) {
+        Set<UUID> ids = new LinkedHashSet<>();
+        if (headPersonId != null) {
+            ids.add(headPersonId);
+        }
+        if (memberPersonIds != null) {
+            ids.addAll(memberPersonIds);
+        }
+        return ids;
+    }
+
     /**
      * Los que entran en un equipo, comprobados: activos, operarios o jefes de equipo, que no sean el
      * jefe de este, ni linemen de otro equipo, ni jefes de otro equipo activo. Los que ya estaban
-     * ({@code alreadyIn}) no se vuelven a comprobar ni se devuelven.
+     * ({@code alreadyIn}) no se vuelven a comprobar ni se devuelven. Quien llama ha bloqueado antes sus
+     * filas ({@code OrganizationLookups.lockPeople}): las dos lecturas cruzadas de abajo, y las de
+     * {@link #requireHead}, solo valen con la persona bloqueada, porque miran otro equipo.
      */
     private List<Person> newMembers(String team, Person head, Collection<UUID> personIds, Set<UUID> alreadyIn, UUID teamId) {
         if (personIds == null || personIds.isEmpty()) {
@@ -485,7 +509,7 @@ class OrganizationUnitServiceImpl implements OrganizationUnitService {
         return discipline;
     }
 
-    /** Quien dirige: activo, de la categoria del nivel y, en un equipo, sin otro equipo. */
+    /** Quien dirige: activo, de la categoria del nivel y, en un equipo, sin otro equipo. Con su fila bloqueada. */
     private void requireHead(OrganizationUnitKind kind, WorkDiscipline discipline, Person head, UUID unitId) {
         if (!Boolean.TRUE.equals(head.getActive())) {
             throw new OrganizationRuleException(head.fullName() + " is deactivated");

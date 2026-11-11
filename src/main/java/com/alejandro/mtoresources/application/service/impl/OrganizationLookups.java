@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -39,6 +40,15 @@ import java.util.UUID;
  * de los commits, toda transaccion que vaya a publicar un {@code team.updated} bloquea antes las filas
  * de esos equipos en orden de id ({@link #lockTeams}), y construye la vista despues: la segunda
  * transaccion espera a la primera y lee lo que esta dejo.</p>
+ *
+ * <p><b>Orden de bloqueo.</b> Siempre el mismo, para que dos transacciones no se esperen la una a la
+ * otra: primero las unidades (la que se modifica y despues los equipos, en orden de id,
+ * {@link #lockTeams}) y <b>despues</b> las personas, en orden de id ({@link #lockPeople}, o
+ * {@code PersonRepository.findByIdForUpdate} cuando es una sola). Nunca una unidad con una persona ya
+ * bloqueada. Las personas se bloquean en todo camino que da un jefe o linemen a un equipo: «quien
+ * lidera un equipo activo no va de lineman en otro», y al reves, se comprueba entre dos equipos
+ * distintos, asi que la fila que serializa esa comprobacion es la de la persona, no la de un equipo
+ * (los indices unicos parciales cubren cada papel por separado, no el cruce).</p>
  */
 @Component
 @RequiredArgsConstructor
@@ -158,6 +168,21 @@ class OrganizationLookups {
             return List.of();
         }
         return unitRepository.lockAllInIdOrder(teamIds).stream().filter(OrganizationUnit::isTeam).toList();
+    }
+
+    /**
+     * Bloquea las filas de esas personas en orden de id, <b>despues</b> de las unidades y antes de
+     * comprobar que papel tienen en otros equipos, y las relee: quien espero a otra transaccion ve lo que
+     * esta dejo (su categoria, si sigue activa) y no lo que hubiera cargado antes. Un id que no existe no
+     * falla aqui: lo dice despues {@link #person} con su 404.
+     */
+    void lockPeople(Collection<UUID> personIds) {
+        Set<UUID> ids = new LinkedHashSet<>();
+        personIds.stream().filter(Objects::nonNull).forEach(ids::add);
+        if (ids.isEmpty()) {
+            return;
+        }
+        personRepository.lockAllInIdOrder(ids).forEach(entityManager::refresh);
     }
 
     /**
