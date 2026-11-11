@@ -27,6 +27,15 @@ background work its own `newVirtualThreadPerTaskExecutor`, decorated so that the
 the MDC (`correlationId`) and the `SecurityContext` of whoever asked: without them `created_by`, the
 Envers revision and the `actor` of the events would be lost.
 
+The `@Scheduled` jobs (the outbox relay, metrics and purge; the heartbeat, abandon check and purge of
+the background operations; the daily expiry watch) run on a pool of `spring.task.scheduling.pool.size`
+threads (`SPRING_TASK_SCHEDULING_POOL_SIZE`, 4), virtual or platform according to the flag
+(`configuration/scheduling/SchedulingConfiguration`, the same as `mto-notification`'s). Boot's own
+scheduler runs every `fixedDelay` job on one thread, with virtual threads too: a relay waiting for a
+broker that did not answer stopped the heartbeat, and another replica gave up for abandoned the
+operations this one was still running. A job still never overlaps itself. The immediate dispatch of the
+outbox (`outbox-dispatch`) is not scheduled and stays one thread.
+
 The scarce resource is not the thread but the **connection**: a virtual thread is cheap, but while it
 works it holds a Hikari connection. So the pool size is explicit (`DATABASE_POOL_MAX_SIZE`, 10, as in
 `mto-maintenance` and `mto-stock`: the pools of every service share the 100 `max_connections` of the

@@ -45,7 +45,11 @@ MESSAGING_EXAMPLES_WRITE=true ./mvnw test -Dtest=MessagingContractExamplesTest  
 
 Local environment: `cd ../mto-platform && docker compose --profile all up -d && ./keycloak/apply-partials.sh`.
 Profiles `dev` (default), `test`, `prod`. Port **8089** (`dev`); the container listens on 8080. Behind
-the gateway the prefix is `/api/resources`. Flyway on startup, Hibernate `ddl-auto: validate`: every
+the gateway the prefix is `/api/resources`. Virtual threads are on (`SPRING_THREADS_VIRTUAL_ENABLED`); the
+`@Scheduled` jobs run on a pool of 4 (`SchedulingConfiguration`, `SPRING_TASK_SCHEDULING_POOL_SIZE`),
+virtual threads or not, because Boot's scheduler runs every `fixedDelay` on a single thread and an outbox
+relay that waited for the broker stopped the heartbeat of the background operations; `outbox-dispatch`
+stays one thread. Flyway on startup, Hibernate `ddl-auto: validate`: every
 schema change is a new migration, and one that changes an audited table changes its `_aud` twin.
 
 ## Architecture
@@ -71,7 +75,8 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
   `messaging/outbox` (copy of `mto-configuration`'s), `keycloak` (`RestClientKeycloakDirectory`: the Admin
   API, paged, a missing role empty, anything else `KCK-503`).
 - `configuration` — security, `rabbitmq`, `messaging` (signature), `outbox`, `async` (virtual threads,
-  `OperationsProperties`, the scheduler of the background operations), `expiry` (`ExpiryWatchProperties`,
+  `OperationsProperties`, the scheduler of the background operations), `scheduling`
+  (`SchedulingConfiguration`, the pool the `@Scheduled` jobs run in), `expiry` (`ExpiryWatchProperties`,
   `app.resources.expiry.*`: `enabled`, `cron` in UTC, `warning-days` 30; the daily scheduler of
   `ExpiryWatchService`, only with the broker on, off in `application-test.yml`), `telematics`
   (`TelematicsProperties`, `app.resources.telematics.min-interval`, 5 min), `keycloak`
@@ -212,7 +217,8 @@ on the real routes, and the `@PreAuthorize` of every real `PUT`/`PATCH` whose bo
 `active=false`), `SecurityLayerTest`, `MessagingLayerTest` (the consumer), `MessagingContractExamplesTest`,
 `JpaEntityModelTest`, `KeycloakClientTest` (the Admin API against a `MockRestServiceServer`: the pages, a
 missing role, `KCK-503`; in `BusinessLayerTest` the report runs on a `@Primary` `FakeKeycloakDirectory`),
-`MtoResourcesApplicationTests` (the whole context with Tomcat, and that requests
-and background work run on virtual threads) and the outbox's own tests under
+`MtoResourcesApplicationTests` (the whole context with Tomcat, that requests
+and background work run on virtual threads, and that a blocked `@Scheduled` job does not stop the others,
+with virtual threads and without) and the outbox's own tests under
 `infrastructure/messaging/outbox`. `support/PostgreSQLTestContainer` starts `postgres:17-alpine`, or uses
 `TEST_DATABASE_URL`/`TEST_DATABASE_USERNAME`/`TEST_DATABASE_PASSWORD`; without either the test is skipped.
