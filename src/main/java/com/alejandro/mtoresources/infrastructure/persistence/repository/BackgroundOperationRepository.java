@@ -81,6 +81,7 @@ public interface BackgroundOperationRepository extends JpaRepository<BackgroundO
             """, nativeQuery = true)
     int heartbeat(@Param("ids") Collection<UUID> ids, @Param("now") Instant now);
 
+    /** El trabajo termino bien y la operacion seguia en marcha. 0 filas: ya no lo estaba (ver la siguiente). */
     @Modifying
     @Transactional
     @Query(value = """
@@ -91,6 +92,24 @@ public interface BackgroundOperationRepository extends JpaRepository<BackgroundO
             """, nativeQuery = true)
     int markSucceeded(@Param("id") UUID id, @Param("resultStatus") int resultStatus, @Param("result") String result,
                       @Param("now") Instant now);
+
+    /**
+     * El trabajo termino bien, pero mientras tanto {@link #failAbandoned} la habia dado por abandonada: el
+     * resultado manda, porque el trabajo esta hecho y confirmado, y un {@code FAILED} haria que el cliente lo
+     * repitiera. Solo vale para una que llego a arrancar y que fallo por abandono ({@code abandoned_at}),
+     * nunca para una que fallo por su trabajo; {@code abandoned_at} se queda, que es lo que dice que paso.
+     */
+    @Modifying
+    @Transactional
+    @Query(value = """
+            update background_operation
+               set status = 'SUCCEEDED', finished_at = :now, heartbeat_at = :now,
+                   result_status = :resultStatus, result = cast(:result as json),
+                   error_status = null, error_code = null, error_message = null
+             where id = :id and status = 'FAILED' and abandoned_at is not null and started_at is not null
+            """, nativeQuery = true)
+    int markSucceededAfterAbandon(@Param("id") UUID id, @Param("resultStatus") int resultStatus, @Param("result") String result,
+                                  @Param("now") Instant now);
 
     @Modifying
     @Transactional
@@ -103,12 +122,16 @@ public interface BackgroundOperationRepository extends JpaRepository<BackgroundO
     int markFailed(@Param("id") UUID id, @Param("errorStatus") int errorStatus, @Param("errorCode") String errorCode,
                    @Param("errorMessage") String errorMessage, @Param("now") Instant now);
 
-    /** Las vivas cuyo latido se paro: la replica que las llevaba murio. Quedan {@code FAILED}. */
+    /**
+     * Las vivas cuyo latido se paro: la replica que las llevaba murio, o eso parece desde aqui. Quedan
+     * {@code FAILED} con {@code abandoned_at}; si la replica solo se retraso y su trabajo acaba bien, lo dira
+     * {@link #markSucceededAfterAbandon}.
+     */
     @Modifying
     @Transactional
     @Query(value = """
             update background_operation
-               set status = 'FAILED', finished_at = :now, error_status = 500, error_code = 'OPS-410',
+               set status = 'FAILED', finished_at = :now, abandoned_at = :now, error_status = 500, error_code = 'OPS-410',
                    error_message = 'The operation was abandoned: the instance that ran it stopped answering'
              where status in ('QUEUED', 'RUNNING') and heartbeat_at <= :aliveSince
             """, nativeQuery = true)

@@ -193,11 +193,31 @@ class BudgetedOperationsImpl implements BudgetedOperations {
     private <T> void run(UUID id, int successStatus, Supplier<T> work, CompletableFuture<T> future) {
         try {
             T result = work.get();
-            repository.markSucceeded(id, successStatus, jsonMapper.writeValueAsString(result), Instant.now());
+            succeed(id, successStatus, jsonMapper.writeValueAsString(result));
             future.complete(result);
         } catch (Throwable failure) {
             fail(id, failure, future);
         }
+    }
+
+    /**
+     * Apunta el resultado mirando el recuento de filas. El trabajo ya esta hecho y confirmado en sus propias
+     * transacciones, asi que su resultado es la verdad: si entretanto otra replica (o esta, con el latido
+     * retrasado) la dio por abandonada, la operacion pasa a {@code SUCCEEDED} igualmente, y lo que queda del
+     * abandono es su {@code abandoned_at} y este aviso. Dejarla {@code FAILED} haria que el cliente repitiera
+     * un trabajo hecho.
+     */
+    private void succeed(UUID id, int successStatus, String result) {
+        if (repository.markSucceeded(id, successStatus, result, Instant.now()) == 1) {
+            return;
+        }
+        if (repository.markSucceededAfterAbandon(id, successStatus, result, Instant.now()) == 1) {
+            LOGGER.warn("Background operation {} had been given up for abandoned (its heartbeat was late) but its work "
+                    + "finished: it is recorded as succeeded. Another one of its scope may have run meanwhile", id);
+            return;
+        }
+        LOGGER.error("Background operation {} finished its work but its row could not be marked succeeded: "
+                + "it is no longer running nor abandoned (purged?)", id);
     }
 
     private void fail(UUID id, Throwable failure, CompletableFuture<?> future) {
@@ -244,6 +264,9 @@ class BudgetedOperationsImpl implements BudgetedOperations {
 
     @Override
     public int failAbandoned() {
+        // Primero late por las suyas: si el latido se retraso (el planificador ocupado, una pausa larga) y esta
+        // revision llega antes que el, este proceso daria por abandonado lo que el mismo esta haciendo.
+        heartbeat();
         Instant now = Instant.now();
         int abandoned = repository.failAbandoned(now.minus(properties.staleAfter()), now);
         if (abandoned > 0) {

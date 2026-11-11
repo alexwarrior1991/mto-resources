@@ -66,6 +66,7 @@ import com.alejandro.mtoresources.application.exception.StaleVersionException;
 import com.alejandro.mtoresources.application.exception.TooManyOperationsException;
 import com.alejandro.mtoresources.application.exception.ValidationException;
 import com.alejandro.mtoresources.application.service.BudgetedOperations;
+import com.alejandro.mtoresources.infrastructure.persistence.repository.BackgroundOperationRepository;
 import com.alejandro.mtoresources.application.service.DomainEventPublisher;
 import com.alejandro.mtoresources.application.service.ExpiryWatchService;
 import com.alejandro.mtoresources.application.service.InstrumentService;
@@ -252,6 +253,8 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
     private RepublishService republish;
     @Autowired
     private BudgetedOperations operations;
+    @Autowired
+    private BackgroundOperationRepository operationRows;
     @Autowired
     private JdbcTemplate jdbc;
     @Autowired
@@ -1771,7 +1774,81 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
     }
 
     @Test
-    void anOperationWhoseHeartbeatStoppedIsFailed() throws Exception {
+    void anOperationWhoseHeartbeatStoppedIsFailed() {
+        authenticateAs("ops.someone");
+        UUID dead = UUID.randomUUID();
+        // La de una replica que murio: en marcha y sin latir desde hace una hora. Nadie de este proceso la lleva.
+        jdbc.update("""
+                insert into background_operation (id, kind, scope, status, requested_by, created_at, started_at, heartbeat_at)
+                values (?, 'TEST', ?, 'RUNNING', 'ops.someone', now(), now(), now() - interval '1 hour')
+                """, dead, "test-" + random());
+
+        assertTrue(operations.failAbandoned() >= 1);
+        OperationResponse failed = operations.find(dead);
+        assertEquals(OperationStatus.FAILED, failed.status());
+        assertEquals("OPS-410", failed.error().errorCode());
+        assertNotNull(abandonedAt(dead));
+    }
+
+    @Test
+    void theResultOfAnOperationAbandonedWhileItWorkedWinsAndTheAbandonStaysRecorded() throws Exception {
+        authenticateAs("ops.someone");
+        CountDownLatch release = new CountDownLatch(1);
+        UUID id = operations.run("TEST", "test-" + random(), 201, Duration.ZERO, () -> {
+            await(release);
+            return Map.of("done", true);
+        }).operation().id();
+        waitUntil(() -> operations.find(id).status() == OperationStatus.RUNNING);
+
+        // Otra replica la da por abandonada: su latido se retraso (el planificador ocupado, una pausa larga).
+        jdbc.update("update background_operation set heartbeat_at = now() - interval '1 hour' where id = ?", id);
+        Instant now = Instant.now();
+        assertTrue(operationRows.failAbandoned(now.minus(Duration.ofMinutes(1)), now) >= 1);
+        assertEquals("OPS-410", operations.find(id).error().errorCode());
+
+        // El latido que llega tarde no la resucita: mientras trabaja sigue como la dejo el abandono.
+        operations.heartbeat();
+        assertEquals(OperationStatus.FAILED, operations.find(id).status(), "A late heartbeat does not undo the abandon");
+
+        // El trabajo termina y se confirma: decir FAILED haria que el cliente lo repitiera.
+        release.countDown();
+        waitUntil(() -> operations.find(id).status() == OperationStatus.SUCCEEDED);
+        OperationResponse finished = operations.find(id);
+        assertEquals(201, finished.resultStatus());
+        assertEquals(Map.of("done", true), finished.result());
+        assertNull(finished.error(), "The abandon's error does not stay on a succeeded operation");
+        assertNotNull(abandonedAt(id), "That it was given up for abandoned stays on the row");
+    }
+
+    @Test
+    void aFinishedOperationIsNeverAbandonedAndAFailureAfterTheAbandonKeepsTheAbandon() throws Exception {
+        authenticateAs("ops.someone");
+        // Primero termina y despues pasa el abandono: no la toca, por viejo que sea su latido.
+        UUID done = operations.run("TEST", null, 200, Duration.ofSeconds(5), () -> "ok").operation().id();
+        jdbc.update("update background_operation set heartbeat_at = now() - interval '1 hour' where id = ?", done);
+        Instant now = Instant.now();
+        operationRows.failAbandoned(now.minus(Duration.ofMinutes(1)), now);
+        assertEquals(OperationStatus.SUCCEEDED, operations.find(done).status());
+        assertNull(abandonedAt(done));
+
+        // Una abandonada cuyo trabajo acaba mal sigue abandonada: no hay resultado que salvar.
+        CountDownLatch release = new CountDownLatch(1);
+        UUID failing = operations.run("TEST", null, 200, Duration.ZERO, () -> {
+            await(release);
+            throw new OrganizationRuleException("no");
+        }).operation().id();
+        waitUntil(() -> operations.find(failing).status() == OperationStatus.RUNNING);
+        jdbc.update("update background_operation set heartbeat_at = now() - interval '1 hour' where id = ?", failing);
+        operationRows.failAbandoned(Instant.now().minus(Duration.ofMinutes(1)), Instant.now());
+        release.countDown();
+        Thread.sleep(500);
+        OperationResponse failed = operations.find(failing);
+        assertEquals(OperationStatus.FAILED, failed.status());
+        assertEquals("OPS-410", failed.error().errorCode());
+    }
+
+    @Test
+    void theAbandonCheckBeatsFirstForTheOperationsOfItsOwnProcess() throws Exception {
         authenticateAs("ops.someone");
         CountDownLatch release = new CountDownLatch(1);
         UUID id = operations.run("TEST", "test-" + random(), 200, Duration.ZERO, () -> {
@@ -1779,13 +1856,15 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
             return "late";
         }).operation().id();
         waitUntil(() -> operations.find(id).status() == OperationStatus.RUNNING);
+        // El latido se retraso y la revision del abandono llega antes que el: la operacion sigue viva aqui.
         jdbc.update("update background_operation set heartbeat_at = now() - interval '1 hour' where id = ?", id);
 
-        assertTrue(operations.failAbandoned() >= 1);
-        OperationResponse failed = operations.find(id);
-        assertEquals(OperationStatus.FAILED, failed.status());
-        assertEquals("OPS-410", failed.error().errorCode());
+        operations.failAbandoned();
+
+        assertEquals(OperationStatus.RUNNING, operations.find(id).status(), "This process still runs it");
         release.countDown();
+        assertEquals(OperationStatus.SUCCEEDED, waitFor(id).status());
+        assertNull(abandonedAt(id));
     }
 
     @Test
@@ -2341,6 +2420,11 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         Jwt jwt = Jwt.withTokenValue("token").header("alg", "none").subject(UUID.randomUUID().toString())
                 .claim("preferred_username", username).build();
         SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt, List.of(), username));
+    }
+
+    private Instant abandonedAt(UUID id) {
+        java.sql.Timestamp at = jdbc.queryForObject("select abandoned_at from background_operation where id = ?", java.sql.Timestamp.class, id);
+        return at == null ? null : at.toInstant();
     }
 
     private OperationResponse waitFor(UUID id) {
