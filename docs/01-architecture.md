@@ -27,6 +27,15 @@ background work its own `newVirtualThreadPerTaskExecutor`, decorated so that the
 the MDC (`correlationId`) and the `SecurityContext` of whoever asked: without them `created_by`, the
 Envers revision and the `actor` of the events would be lost.
 
+The `@Scheduled` jobs (the outbox relay, metrics and purge; the heartbeat, abandon check and purge of
+the background operations; the daily expiry watch) run on a pool of `spring.task.scheduling.pool.size`
+threads (`SPRING_TASK_SCHEDULING_POOL_SIZE`, 4), virtual or platform according to the flag
+(`configuration/scheduling/SchedulingConfiguration`, the same as `mto-notification`'s). Boot's own
+scheduler runs every `fixedDelay` job on one thread, with virtual threads too: a relay waiting for a
+broker that did not answer stopped the heartbeat, and another replica gave up for abandoned the
+operations this one was still running. A job still never overlaps itself. The immediate dispatch of the
+outbox (`outbox-dispatch`) is not scheduled and stays one thread.
+
 The scarce resource is not the thread but the **connection**: a virtual thread is cheap, but while it
 works it holds a Hikari connection. So the pool size is explicit (`DATABASE_POOL_MAX_SIZE`, 10, as in
 `mto-maintenance` and `mto-stock`: the pools of every service share the 100 `max_connections` of the
@@ -53,8 +62,20 @@ gives its result (the same body the synchronous call would have given, or its er
   the scope (the turn in `background_operation` is what holds between replicas) does it let the lock go
   and look again with a growing backoff (200 ms → 2 s). A waiting virtual thread costs nothing.
 - **Heartbeat and abandon**: every replica beats for its live operations; one whose heartbeat stops for
-  `app.operations.stale-after` is failed (`OPS-410`) by any replica. Finished ones are purged after
-  `app.operations.retention`.
+  `app.operations.stale-after` is failed (`OPS-410`) by any replica, with `abandoned_at`. The abandon check
+  beats first for the operations of its own process, so a replica never abandons what it is running itself
+  because its heartbeat was late. **The outcome of the work wins over an abandon**: the work commits in
+  its own transactions, so when it ends on a replica that was only late, the operation says what the work
+  did, `SUCCEEDED` with its result or `FAILED` with the work's own error (a 409 a retry does not fix,
+  instead of an `OPS-410` that invites one), with a WARN in the log and `abandonedAt` kept in the row and
+  in the answer; one abandoned in the queue, which never worked, stays `OPS-410`. A client that had read
+  `OPS-410` and retried is the case that remains, and it is the one `abandonedAt` explains. Meanwhile
+  another operation of the same scope may have started: the abandon freed the turn. **A result that
+  cannot be recorded is never turned into a failure**: recording it is retried (3 attempts, with the
+  poll backoff); if the database never answers, the row stays `RUNNING` without a heartbeat and ends
+  `OPS-410` (said in the log), and the request that was waiting receives the result, or the error, of
+  the work all the same.
+  Finished ones are purged after `app.operations.retention`.
 - **Context**: what the servlet request knew (correlation id, method, URI, client address, user agent)
   is copied into `BackgroundOperationContext`, which the Envers listener and the event factory read on
   the worker thread.

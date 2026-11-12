@@ -22,18 +22,27 @@ import com.alejandro.mtoresources.application.service.VehicleRepairService;
 import com.alejandro.mtoresources.application.service.VehicleService;
 import com.alejandro.mtoresources.application.service.VehicleTypeService;
 import com.alejandro.mtoresources.configuration.async.AsyncConfiguration;
+import com.alejandro.mtoresources.configuration.scheduling.SchedulingConfiguration;
 import com.alejandro.mtoresources.infrastructure.web.actuator.RepublishEndpoint;
 import com.alejandro.mtoresources.support.PostgreSQLTestContainer;
 import jakarta.servlet.Filter;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.boot.autoconfigure.task.TaskSchedulingAutoConfiguration;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.task.AsyncTaskExecutor;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -42,7 +51,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -95,6 +107,7 @@ class MtoResourcesApplicationTests extends PostgreSQLTestContainer {
 
     @Test
     void everyBusinessServiceIsABean() {
+        assertNotNull(context.getBean(SchedulingConfiguration.class), "The pool of the @Scheduled jobs");
         for (Class<?> type : List.of(PersonService.class, OrganizationUnitService.class, ParkingSiteService.class, VehicleTypeService.class,
                 VehicleService.class, VehicleLocationService.class, RepublishService.class, BudgetedOperations.class,
                 DomainEventPublisher.class, RepublishEndpoint.class, QualificationTypeService.class, PersonQualificationService.class,
@@ -120,5 +133,67 @@ class MtoResourcesApplicationTests extends PostgreSQLTestContainer {
         CompletableFuture<Boolean> background = new CompletableFuture<>();
         executor.execute(() -> background.complete(Thread.currentThread().isVirtual()));
         assertTrue(background.get(5, TimeUnit.SECONDS), "The background executor on virtual threads");
+    }
+
+    /**
+     * Una pasada {@code @Scheduled} bloqueada (el relay del outbox esperando al broker) no para a las demas:
+     * mientras espera, el latido de las operaciones de fondo sigue corriendo, con hilos virtuales y sin
+     * ellos. Con el planificador de Boot las dos comparten un hilo (el unico de planificacion del
+     * {@code SimpleAsyncTaskScheduler} para los {@code fixedDelay} con hilos virtuales, el unico del pool sin
+     * ellos): el latido se paraba y otra replica daba por abandonadas las operaciones en marcha.
+     */
+    @Test
+    void aBlockedScheduledPassDoesNotStopTheOthersWithVirtualThreadsAndWithout() throws Exception {
+        StandardEnvironment defaults = new StandardEnvironment();
+        new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml"))
+                .forEach(defaults.getPropertySources()::addLast);
+        Integer poolSize = defaults.getProperty("spring.task.scheduling.pool.size", Integer.class);
+        assertEquals(4, poolSize, "The default of SPRING_TASK_SCHEDULING_POOL_SIZE");
+
+        for (boolean virtual : List.of(true, false)) {
+            new ApplicationContextRunner()
+                    .withConfiguration(AutoConfigurations.of(TaskSchedulingAutoConfiguration.class))
+                    .withUserConfiguration(SchedulingConfiguration.class, ABlockedPassAndABeat.class)
+                    .withPropertyValues("spring.threads.virtual.enabled=" + virtual, "spring.task.scheduling.pool.size=" + poolSize)
+                    .run(started -> {
+                        ABlockedPassAndABeat passes = started.getBean(ABlockedPassAndABeat.class);
+                        try {
+                            assertTrue(passes.blocked.await(10, TimeUnit.SECONDS), "The blocked pass started");
+                            assertTrue(passes.beats.await(10, TimeUnit.SECONDS),
+                                    "The beat keeps running while the other pass is blocked, with spring.threads.virtual.enabled=" + virtual);
+                            assertEquals(Set.of(virtual), passes.onVirtualThreads, "Virtual threads only with the flag");
+                        } finally {
+                            passes.release.countDown();
+                        }
+                    });
+        }
+    }
+
+    /**
+     * Sin {@code @Configuration} a proposito: una clase anidada con ella sustituiria la configuracion de este
+     * {@code @SpringBootTest}. {@code @EnableScheduling} basta para que el runner la procese.
+     */
+    @EnableScheduling
+    static class ABlockedPassAndABeat {
+
+        final CountDownLatch blocked = new CountDownLatch(1);
+        final CountDownLatch beats = new CountDownLatch(3);
+        final CountDownLatch release = new CountDownLatch(1);
+        final Set<Boolean> onVirtualThreads = ConcurrentHashMap.newKeySet();
+
+        /** El relay que espera a un broker que no contesta. */
+        @Scheduled(fixedDelay = 60_000)
+        void blockedPass() throws InterruptedException {
+            onVirtualThreads.add(Thread.currentThread().isVirtual());
+            blocked.countDown();
+            release.await(30, TimeUnit.SECONDS);
+        }
+
+        /** El latido: empieza despues de la bloqueada y tiene que repetirse mientras ella espera. */
+        @Scheduled(initialDelay = 200, fixedDelay = 50)
+        void beat() {
+            onVirtualThreads.add(Thread.currentThread().isVirtual());
+            beats.countDown();
+        }
     }
 }

@@ -23,6 +23,7 @@ columns without a foreign key.
 | `V8` | `qualification_type` (with its seeds), `person_qualification`, `vehicle_document`, `instrument` and their `_aud`; `vehicle_type.required_driver_qualification_type_id` with its backfill |
 | `V9` | `track_access_point` (the snapshot of the track access points of `mto-configuration`); `vehicle_location_event.access_point_id` |
 | `V10` | Empties the driver qualification `V8` (or the default of then) gave to a model that is not self-propelled: `RR-OPERATOR` on a road-rail one, the licence on a road one; another value chosen by hand stays |
+| `V13` | `background_operation.abandoned_at`: when an operation was given up for abandoned, kept if its work ended afterwards |
 
 ## People and organization (`V5`)
 
@@ -125,12 +126,15 @@ no twin to change.
 | `vehicle_repair` | `code` (`REP-000001`, from `vehicle_repair_code_seq`), `vehicle_id`, `kind` (`repair_kind`), `status` (`repair_status`: `PLANNED`, `OPEN`, `CLOSED`, `CANCELLED`), `immobilises`, `description` (500), `workshop` (150), `planned_from`, `planned_to`, `opened_at`, `closed_at`, `odometer_km`, `engine_hours` (`numeric(10,1)`), `cost` (`numeric(12,2)`), `notes`, `version` | `code` unique; `planned_to >= planned_from`; a `PLANNED` one has `planned_from`, an `OPEN` or `CLOSED` one `opened_at`, a `CLOSED` one `closed_at` (not before the opening); counters and cost not negative; index on `(vehicle_id, status)`. Audited (`vehicle_repair_aud`) |
 | `vehicle.telematics_device_id` | its GPS device (64; null: none) | unique; its twin in `vehicle_aud` in the same migration |
 
-## Background operations (`V4`)
+## Background operations (`V4`, `V13`)
 
 `background_operation`: `id`, `kind`, `scope`, `status` (`QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`),
 `requested_by`, `correlation_id`, `request_method`, `request_uri`, `result_status`, `result` (`json`),
 `error_status`, `error_code`, `error_message`, `created_at`, `started_at`, `finished_at`,
-`heartbeat_at`. Finished if and only if `SUCCEEDED`/`FAILED`; a `FAILED` one has its error code.
+`heartbeat_at`, `abandoned_at` (`V13`: when it was given up for abandoned; it stays if its work ended
+afterwards and the row took the outcome of the work, `SUCCEEDED` or `FAILED` with the work's own error
+instead of `OPS-410`, see `01-architecture.md`; `abandonedAt` in the answer). Finished if and only if
+`SUCCEEDED`/`FAILED`; a `FAILED` one has its error code.
 Written only with native SQL (`BackgroundOperationRepository`): the insert counts the live ones in its
 own `WHERE` under an advisory lock, and the start takes its turn by `(created_at, id)` within its scope.
 Not audited: it is its own history, and the purge deletes the finished ones after

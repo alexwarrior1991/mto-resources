@@ -83,4 +83,8 @@ public class BackgroundOperation {
 
     @Column(name = "heartbeat_at", nullable = false)
     private Instant heartbeatAt;
+
+    /** Cuando se dio por abandonada; se queda aunque su trabajo terminara bien despues. */
+    @Column(name = "abandoned_at")
+    private Instant abandonedAt;
 }

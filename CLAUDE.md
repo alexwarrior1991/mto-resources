@@ -45,7 +45,11 @@ MESSAGING_EXAMPLES_WRITE=true ./mvnw test -Dtest=MessagingContractExamplesTest  
 
 Local environment: `cd ../mto-platform && docker compose --profile all up -d && ./keycloak/apply-partials.sh`.
 Profiles `dev` (default), `test`, `prod`. Port **8089** (`dev`); the container listens on 8080. Behind
-the gateway the prefix is `/api/resources`. Flyway on startup, Hibernate `ddl-auto: validate`: every
+the gateway the prefix is `/api/resources`. Virtual threads are on (`SPRING_THREADS_VIRTUAL_ENABLED`); the
+`@Scheduled` jobs run on a pool of 4 (`SchedulingConfiguration`, `SPRING_TASK_SCHEDULING_POOL_SIZE`),
+virtual threads or not, because Boot's scheduler runs every `fixedDelay` on a single thread and an outbox
+relay that waited for the broker stopped the heartbeat of the background operations; `outbox-dispatch`
+stays one thread. Flyway on startup, Hibernate `ddl-auto: validate`: every
 schema change is a new migration, and one that changes an audited table changes its `_aud` twin.
 
 ## Architecture
@@ -71,7 +75,8 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
   `messaging/outbox` (copy of `mto-configuration`'s), `keycloak` (`RestClientKeycloakDirectory`: the Admin
   API, paged, a missing role empty, anything else `KCK-503`).
 - `configuration` — security, `rabbitmq`, `messaging` (signature), `outbox`, `async` (virtual threads,
-  `OperationsProperties`, the scheduler of the background operations), `expiry` (`ExpiryWatchProperties`,
+  `OperationsProperties`, the scheduler of the background operations), `scheduling`
+  (`SchedulingConfiguration`, the pool the `@Scheduled` jobs run in), `expiry` (`ExpiryWatchProperties`,
   `app.resources.expiry.*`: `enabled`, `cron` in UTC, `warning-days` 30; the daily scheduler of
   `ExpiryWatchService`, only with the broker on, off in `application-test.yml`), `telematics`
   (`TelematicsProperties`, `app.resources.telematics.min-interval`, 5 min), `keycloak`
@@ -152,7 +157,12 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
 - **Background work holds no connection while it waits** (in one instance on a lock per scope,
   `OperationScopeLocks`; between replicas it looks again with a backoff) and is capped for the whole
   deployment in the database (`BudgetedOperations`); an API route that adopts it does so through
-  `Prefer: respond-async` only, so the existing clients stay synchronous.
+  `Prefer: respond-async` only, so the existing clients stay synchronous. **The outcome of the work wins
+  over an abandon**, as in `mto-maintenance`: the row count of `markSucceeded`/`markFailed` is read, and an
+  operation given up for abandoned (`OPS-410`, `abandoned_at`, `V13`) while it worked ends with what its
+  work did (`markSucceededAfterAbandon`, `markFailedAfterAbandon`, a WARN; `abandonedAt` stays in the
+  answer); a result that cannot be recorded is retried, never turned into a failure, and whoever waits
+  receives the work's result or error all the same; the abandon check beats first for its own process.
 - `@Transactional(noRollbackFor = BusinessException.class)` on `VehicleLocationService.record`: its rules
   are checked before writing anything, so a refusal does not doom the inbox transaction of the shift
   consumer, which records `UNKNOWN` with the reason instead.
@@ -174,7 +184,11 @@ denied. A new role goes to `SecurityRoles` **and** `keycloak/mto-resources-parti
 Publishes `person` (with all its `qualifications` and its `unavailable` periods), `team`, `vehicle` (with
 all its `documents`, its `unavailable` periods and the qualification its model asks of the driver) and `instrument` (`created`/`updated`/`deactivated`), and the
 daily expiry warnings `qualification`, `vehicle-document` and `calibration` (`expiring`/`expired`), on
-`mto.resources.exchange` through the outbox, inside the business transaction; declares no queue (`mto-maintenance` and
+`mto.resources.exchange` through the outbox, inside the business transaction (the relay renews the claim
+of each message before publishing it and does not publish one that is no longer its own, counts the
+attempt at the claim, so a poison message ends `FAILED` too, and drains what there is within
+`app.outbox.pass-time-budget`; timeouts that contradict each other stop the startup; the relay never
+writes the `sequenceNumber`; `docs/06-messaging.md`, `OutboxRelayDataJpaTest`); declares no queue (`mto-maintenance` and
 `mto-notification` declare theirs). What `republish` publishes carries `republished: true`, and a vehicle
 event says whether that change moved its availability (`availabilityChanged`): `mto-notification` notices
 people of changes, not of republications nor of every note. Its three consumer queues and their DLQs
@@ -209,7 +223,8 @@ on the real routes, and the `@PreAuthorize` of every real `PUT`/`PATCH` whose bo
 `active=false`), `SecurityLayerTest`, `MessagingLayerTest` (the consumer), `MessagingContractExamplesTest`,
 `JpaEntityModelTest`, `KeycloakClientTest` (the Admin API against a `MockRestServiceServer`: the pages, a
 missing role, `KCK-503`; in `BusinessLayerTest` the report runs on a `@Primary` `FakeKeycloakDirectory`),
-`MtoResourcesApplicationTests` (the whole context with Tomcat, and that requests
-and background work run on virtual threads) and the outbox's own tests under
+`MtoResourcesApplicationTests` (the whole context with Tomcat, that requests
+and background work run on virtual threads, and that a blocked `@Scheduled` job does not stop the others,
+with virtual threads and without) and the outbox's own tests under
 `infrastructure/messaging/outbox`. `support/PostgreSQLTestContainer` starts `postgres:17-alpine`, or uses
 `TEST_DATABASE_URL`/`TEST_DATABASE_USERNAME`/`TEST_DATABASE_PASSWORD`; without either the test is skipped.
