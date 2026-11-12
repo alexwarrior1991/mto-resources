@@ -60,7 +60,13 @@ A route of the API that adopts it follows RFC 7240: only a request with `Prefer:
 work does not finish within that budget, with `Location: /api/v1/resources/operations/{id}`,
 `Preference-Applied: respond-async` and the operation; without the header the call stays synchronous.
 `GET /operations/{id}` returns, once finished, `resultStatus` and `result` (the body the synchronous
-call would have returned) or `error` (`status`, `errorCode`, `message`). Above
+call would have returned) or `error` (`status`, `errorCode`, `message`). An operation whose instance
+stopped beating for `app.operations.stale-after` (1 min) is `FAILED` with `error.errorCode` `OPS-410`
+(abandoned; its `status` is 500), with `abandonedAt` (absent when it never happened). If that instance
+was only slow and its work ends afterwards, the operation takes the outcome of the work (`SUCCEEDED`
+with its result, or `FAILED` with the work's own error) and keeps `abandonedAt`: an `OPS-410` is the one
+terminal answer that may still change, so a client that reads it should look at the operation again
+before repeating the request. Above
 `app.operations.max-active` live operations: 429 `OPS-429` with `Retry-After`.
 
 Every `Location` (a `201`, a `202`) carries the path **inside the service** (`/api/v1/resources/...`),

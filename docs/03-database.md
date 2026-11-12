@@ -23,7 +23,7 @@ columns without a foreign key.
 | `V8` | `qualification_type` (with its seeds), `person_qualification`, `vehicle_document`, `instrument` and their `_aud`; `vehicle_type.required_driver_qualification_type_id` with its backfill |
 | `V9` | `track_access_point` (the snapshot of the track access points of `mto-configuration`); `vehicle_location_event.access_point_id` |
 | `V10` | Empties the driver qualification `V8` (or the default of then) gave to a model that is not self-propelled: `RR-OPERATOR` on a road-rail one, the licence on a road one; another value chosen by hand stays |
-| `V13` | `background_operation.abandoned_at`: when an operation was given up for abandoned, kept if its work ended well afterwards |
+| `V13` | `background_operation.abandoned_at`: when an operation was given up for abandoned, kept if its work ended afterwards |
 
 ## People and organization (`V5`)
 
@@ -132,7 +132,8 @@ no twin to change.
 `requested_by`, `correlation_id`, `request_method`, `request_uri`, `result_status`, `result` (`json`),
 `error_status`, `error_code`, `error_message`, `created_at`, `started_at`, `finished_at`,
 `heartbeat_at`, `abandoned_at` (`V13`: when it was given up for abandoned; it stays if its work ended
-well afterwards and the row became `SUCCEEDED`, see `01-architecture.md`). Finished if and only if
+afterwards and the row took the outcome of the work, `SUCCEEDED` or `FAILED` with the work's own error
+instead of `OPS-410`, see `01-architecture.md`; `abandonedAt` in the answer). Finished if and only if
 `SUCCEEDED`/`FAILED`; a `FAILED` one has its error code.
 Written only with native SQL (`BackgroundOperationRepository`): the insert counts the live ones in its
 own `WHERE` under an advisory lock, and the start takes its turn by `(created_at, id)` within its scope.

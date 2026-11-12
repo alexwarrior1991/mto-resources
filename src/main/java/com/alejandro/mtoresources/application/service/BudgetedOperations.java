@@ -38,10 +38,9 @@ public interface BudgetedOperations {
     void heartbeat();
 
     /**
-     * Las vivas sin latido en {@code app.operations.stale-after} pasan a {@code FAILED}: su replica murio.
-     * Antes late por las de este proceso, que siguen vivas aunque su latido se haya retrasado. Si una
-     * abandonada resulta seguir trabajando en otra replica y su trabajo acaba bien, pasa a {@code SUCCEEDED}
-     * con su resultado: el trabajo esta hecho, y decir que fallo haria que el cliente lo repitiera.
+     * Las vivas sin latido en {@code app.operations.stale-after} pasan a {@code FAILED} ({@code OPS-410}): su
+     * replica murio, o eso parece. Antes late por las de este proceso, para no abandonar lo que el mismo
+     * hace. Si el trabajo de una abandonada termina despues, la operacion dice lo que hizo ese trabajo.
      */
     int failAbandoned();
 

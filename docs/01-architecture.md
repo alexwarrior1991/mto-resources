@@ -64,12 +64,17 @@ gives its result (the same body the synchronous call would have given, or its er
 - **Heartbeat and abandon**: every replica beats for its live operations; one whose heartbeat stops for
   `app.operations.stale-after` is failed (`OPS-410`) by any replica, with `abandoned_at`. The abandon check
   beats first for the operations of its own process, so a replica never abandons what it is running itself
-  because its heartbeat was late. **A result wins over an abandon**: the work commits in its own
-  transactions, so when it ends well on a replica that was only late, the operation becomes `SUCCEEDED`
-  with its result (a WARN in the log, `abandoned_at` kept on the row) instead of staying `FAILED` and
-  making the client repeat work already done; a client that had read `OPS-410` and retried is the case
-  that remains, and it is the one `abandoned_at` explains. A work that fails after the abandon stays
-  `OPS-410`. Meanwhile another operation of the same scope may have started: the abandon freed the turn.
+  because its heartbeat was late. **The outcome of the work wins over an abandon**: the work commits in
+  its own transactions, so when it ends on a replica that was only late, the operation says what the work
+  did, `SUCCEEDED` with its result or `FAILED` with the work's own error (a 409 a retry does not fix,
+  instead of an `OPS-410` that invites one), with a WARN in the log and `abandonedAt` kept in the row and
+  in the answer; one abandoned in the queue, which never worked, stays `OPS-410`. A client that had read
+  `OPS-410` and retried is the case that remains, and it is the one `abandonedAt` explains. Meanwhile
+  another operation of the same scope may have started: the abandon freed the turn. **A result that
+  cannot be recorded is never turned into a failure**: recording it is retried (3 attempts, with the
+  poll backoff); if the database never answers, the row stays `RUNNING` without a heartbeat and ends
+  `OPS-410` (said in the log), and the request that was waiting receives the result, or the error, of
+  the work all the same.
   Finished ones are purged after `app.operations.retention`.
 - **Context**: what the servlet request knew (correlation id, method, URI, client address, user agent)
   is copied into `BackgroundOperationContext`, which the Envers listener and the event factory read on

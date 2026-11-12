@@ -157,10 +157,12 @@ Three layers under `com.alejandro.mtoresources`, the same split as `mto-maintena
 - **Background work holds no connection while it waits** (in one instance on a lock per scope,
   `OperationScopeLocks`; between replicas it looks again with a backoff) and is capped for the whole
   deployment in the database (`BudgetedOperations`); an API route that adopts it does so through
-  `Prefer: respond-async` only, so the existing clients stay synchronous. **The result of the work wins
-  over an abandon**: the row count of `markSucceeded` is read, and an operation given up for abandoned
-  (`OPS-410`, `abandoned_at`, `V13`) whose work ends well becomes `SUCCEEDED` (`markSucceededAfterAbandon`,
-  a WARN; `abandoned_at` stays); the abandon check beats first for the operations of its own process.
+  `Prefer: respond-async` only, so the existing clients stay synchronous. **The outcome of the work wins
+  over an abandon**, as in `mto-maintenance`: the row count of `markSucceeded`/`markFailed` is read, and an
+  operation given up for abandoned (`OPS-410`, `abandoned_at`, `V13`) while it worked ends with what its
+  work did (`markSucceededAfterAbandon`, `markFailedAfterAbandon`, a WARN; `abandonedAt` stays in the
+  answer); a result that cannot be recorded is retried, never turned into a failure, and whoever waits
+  receives the work's result or error all the same; the abandon check beats first for its own process.
 - `@Transactional(noRollbackFor = BusinessException.class)` on `VehicleLocationService.record`: its rules
   are checked before writing anything, so a refusal does not doom the inbox transaction of the shift
   consumer, which records `UNKNOWN` with the reason instead.

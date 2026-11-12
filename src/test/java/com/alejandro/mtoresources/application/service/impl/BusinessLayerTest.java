@@ -256,6 +256,19 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
     @Autowired
     private BackgroundOperationRepository operationRows;
     @Autowired
+    @org.springframework.beans.factory.annotation.Qualifier(com.alejandro.mtoresources.configuration.async.AsyncConfiguration.TASK_EXECUTOR)
+    private org.springframework.core.task.AsyncTaskExecutor operationExecutor;
+    @Autowired
+    private com.alejandro.mtoresources.application.service.OperationErrorTranslator operationErrors;
+    @Autowired
+    private com.alejandro.mtoresources.configuration.security.CurrentUserService currentUserService;
+    @Autowired
+    private com.alejandro.mtoresources.configuration.async.OperationsProperties operationsProperties;
+    @Autowired
+    private tools.jackson.databind.json.JsonMapper jsonMapper;
+    @Autowired
+    private OperationScopeLocks operationScopeLocks;
+    @Autowired
     private JdbcTemplate jdbc;
     @Autowired
     private PersonAbsenceService absences;
@@ -1804,7 +1817,9 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         jdbc.update("update background_operation set heartbeat_at = now() - interval '1 hour' where id = ?", id);
         Instant now = Instant.now();
         assertTrue(operationRows.failAbandoned(now.minus(Duration.ofMinutes(1)), now) >= 1);
-        assertEquals("OPS-410", operations.find(id).error().errorCode());
+        OperationResponse abandoned = operations.find(id);
+        assertEquals("OPS-410", abandoned.error().errorCode());
+        assertNotNull(abandoned.abandonedAt());
 
         // El latido que llega tarde no la resucita: mientras trabaja sigue como la dejo el abandono.
         operations.heartbeat();
@@ -1818,10 +1833,11 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         assertEquals(Map.of("done", true), finished.result());
         assertNull(finished.error(), "The abandon's error does not stay on a succeeded operation");
         assertNotNull(abandonedAt(id), "That it was given up for abandoned stays on the row");
+        assertEquals(abandoned.abandonedAt(), finished.abandonedAt(), "And the answer says it");
     }
 
     @Test
-    void aFinishedOperationIsNeverAbandonedAndAFailureAfterTheAbandonKeepsTheAbandon() throws Exception {
+    void aFinishedOperationIsNeverAbandonedAndAWorkThatFailsAfterTheAbandonSaysItsOwnError() throws Exception {
         authenticateAs("ops.someone");
         // Primero termina y despues pasa el abandono: no la toca, por viejo que sea su latido.
         UUID done = operations.run("TEST", null, 200, Duration.ofSeconds(5), () -> "ok").operation().id();
@@ -1829,22 +1845,82 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
         Instant now = Instant.now();
         operationRows.failAbandoned(now.minus(Duration.ofMinutes(1)), now);
         assertEquals(OperationStatus.SUCCEEDED, operations.find(done).status());
-        assertNull(abandonedAt(done));
+        assertNull(operations.find(done).abandonedAt());
 
-        // Una abandonada cuyo trabajo acaba mal sigue abandonada: no hay resultado que salvar.
+        // Una abandonada cuyo trabajo acaba mal dice el error de su trabajo (un 409 que repetir no arregla), no
+        // el OPS-410, que invita a repetir. La que se abandono en cola y nunca llego a trabajar se queda en OPS-410.
+        String scope = "test-" + random();
         CountDownLatch release = new CountDownLatch(1);
-        UUID failing = operations.run("TEST", null, 200, Duration.ZERO, () -> {
+        UUID working = operations.run("TEST", scope, 200, Duration.ZERO, () -> {
             await(release);
             throw new OrganizationRuleException("no");
         }).operation().id();
-        waitUntil(() -> operations.find(failing).status() == OperationStatus.RUNNING);
-        jdbc.update("update background_operation set heartbeat_at = now() - interval '1 hour' where id = ?", failing);
-        operationRows.failAbandoned(Instant.now().minus(Duration.ofMinutes(1)), Instant.now());
+        AtomicBoolean ran = new AtomicBoolean();
+        UUID queued = operations.run("TEST", scope, 200, Duration.ZERO, () -> {
+            ran.set(true);
+            return "never";
+        }).operation().id();
+        waitUntil(() -> operations.find(working).status() == OperationStatus.RUNNING);
+        jdbc.update("update background_operation set heartbeat_at = now() - interval '1 hour' where id in (?, ?)", working, queued);
+        assertTrue(operationRows.failAbandoned(Instant.now().minus(Duration.ofMinutes(1)), Instant.now()) >= 2);
+        assertEquals("OPS-410", operations.find(working).error().errorCode());
+
         release.countDown();
-        Thread.sleep(500);
-        OperationResponse failed = operations.find(failing);
+        waitUntil(() -> !"OPS-410".equals(operations.find(working).error().errorCode()));
+        OperationResponse failed = operations.find(working);
         assertEquals(OperationStatus.FAILED, failed.status());
-        assertEquals("OPS-410", failed.error().errorCode());
+        assertEquals("UNI-001", failed.error().errorCode());
+        assertEquals("no", failed.error().message());
+        assertNotNull(failed.abandonedAt(), "It still says it was given up for a while");
+
+        Thread.sleep(500);
+        assertFalse(ran.get(), "Abandoned in the queue: it never starts");
+        assertEquals("OPS-410", operations.find(queued).error().errorCode());
+    }
+
+    /**
+     * El trabajo termino y no se pudo apuntar a la primera (la base de datos no contesto): se reintenta, y la
+     * operacion no queda fallida con el error de apuntarla, que no es del trabajo. Y si no hay manera de
+     * apuntarlo, quien espera recibe igualmente el resultado del trabajo.
+     */
+    @Test
+    void aSuccessThatCouldNotBeRecordedIsRetriedNeverTurnedIntoAFailureAndTheWaitingRequestGetsTheResult() {
+        authenticateAs("ops.someone");
+        AtomicInteger attempts = new AtomicInteger();
+        BudgetedOperations.Outcome<String> outcome = replicaFailingToRecord(attempts, 1)
+                .run("TEST", null, 200, Duration.ofSeconds(5), () -> "done");
+        assertTrue(outcome.completed());
+        assertEquals("done", outcome.result());
+        assertEquals(OperationStatus.SUCCEEDED, outcome.operation().status());
+        assertEquals(2, attempts.get());
+
+        // La base de datos no contesta nunca: la fila se queda en marcha (y acabara en OPS-410), pero la
+        // peticion que espera recibe lo que hizo el trabajo, no un fallo que no es suyo.
+        AtomicInteger never = new AtomicInteger();
+        BudgetedOperations.Outcome<String> unrecorded = replicaFailingToRecord(never, Integer.MAX_VALUE)
+                .run("TEST", null, 200, Duration.ofSeconds(10), () -> "done anyway");
+        assertTrue(unrecorded.completed());
+        assertEquals("done anyway", unrecorded.result());
+        assertEquals(OperationStatus.RUNNING, unrecorded.operation().status(), "Never recorded as a failure");
+        assertEquals(3, never.get(), "A few attempts, not for ever");
+        jdbc.update("delete from background_operation where id = ?", unrecorded.operation().id());
+    }
+
+    /** Otra replica cuya base de datos falla las primeras {@code failures} veces que apunta un resultado. */
+    private BudgetedOperations replicaFailingToRecord(AtomicInteger attempts, int failures) {
+        BackgroundOperationRepository flaky = (BackgroundOperationRepository) java.lang.reflect.Proxy.newProxyInstance(
+                getClass().getClassLoader(), new Class<?>[]{BackgroundOperationRepository.class}, (proxy, method, args) -> {
+                    if (method.getName().equals("markSucceeded") && attempts.getAndIncrement() < failures) {
+                        throw new org.springframework.dao.TransientDataAccessResourceException("connection lost");
+                    }
+                    try {
+                        return method.invoke(operationRows, args);
+                    } catch (java.lang.reflect.InvocationTargetException thrown) {
+                        throw thrown.getCause();
+                    }
+                });
+        return new BudgetedOperationsImpl(flaky, operationExecutor, transactionManager, operationErrors, currentUserService,
+                operationsProperties, jsonMapper, operationScopeLocks);
     }
 
     @Test
