@@ -74,6 +74,50 @@ example in the same commit (`MESSAGING_EXAMPLES_WRITE=true` regenerates them).
   (also after `V8`: the people, vehicles and instruments a consumer has do not carry qualifications,
   documents, the driver qualification of their model nor the instruments until they are republished).
 
+### The relay: the claim, the attempts and the drain
+
+The outbox is the copy of `mto-configuration`'s `core/outbox` (its `README_MESSAGING.md` §11.6 is the
+reference), and its relay holds three things by construction, not by the arithmetic of the settings:
+
+- **A message is published only by whoever holds its claim.** A batch is claimed at once, but a broker
+  that stops confirming costs `confirm-timeout` per message (50 × 10 s against a visibility of 300 s), so
+  the tail of a batch was claimed by another replica, or by the next pass, while the first relay was
+  still publishing it: duplicates and, on one aggregate, disorder. `next_attempt_at` of an `IN_PROGRESS`
+  row is the **token** of its claim (only what is already due is claimed, so every claim writes a
+  strictly later instant). Before publishing **each** message the relay renews its claim with a
+  conditional write (`where status = 'IN_PROGRESS' and next_attempt_at = <its token>`), and the row
+  count is the answer: 0, the message is somebody else's or already closed and is not published
+  (`outbox.claim.lost.total`); 1, it has a whole visibility for that one publication. Rescheduling
+  (`PENDING`), exhausting (`FAILED`) and releasing carry the same condition; marking `PUBLISHED` does
+  not, on purpose: what the broker confirmed is published whoever holds the claim.
+- **A poison message ends.** The attempt is counted **when the message is claimed**, not when it fails:
+  the message that kills the process, or whose failure can never be recorded, spends it too. One that
+  arrives at a claim with its attempts exhausted is set `FAILED` in that transaction (`last_error`
+  «Reclamado N veces sin que ningun relay llegara a cerrarlo»), shows in `outbox.messages.failed` and
+  in `GET /actuator/outbox`, and comes back with the redrive. `attempts` is the number of the attempt
+  in course. While it spins it holds its aggregate, like any `IN_PROGRESS`; once `FAILED` the next ones
+  of the aggregate leave, as with any `FAILED`.
+- **A pass drains what there is.** With the order per aggregate a batch carries one message per
+  aggregate, and there was one batch per pass: N events of a team left one every
+  `publisher-fixed-delay`. A pass keeps claiming batches until there is no work, `pass-time-budget`
+  (30 s) is spent or a whole batch publishes nothing (the broker is not there: insisting would only
+  burn attempts). At the deadline what was claimed and not started is released (`PENDING`, due now,
+  without the attempt it was counted). The order does not change: the next message of an aggregate is
+  only claimed once the previous one is `PUBLISHED`.
+
+**The `sequenceNumber` is untouched by any of this**: the database assigns it when the event is inserted,
+inside the business transaction (`outbox_message_sequence`), and the relay never writes it; a redrive
+or a release keeps the original number.
+
+The timeouts that contradict each other stop the startup, naming the property to fix
+(`OutboxProperties.validate()`): `app.outbox.claim-visibility-timeout >= 2 × confirm-timeout` and
+`pass-time-budget + confirm-timeout <= claim-visibility-timeout` (the defaults, 5 m, 10 s and 30 s,
+pass), and `max-attempts`, `batch-size` and the three durations positive. One window no relay can
+close alone remains: a publication that, after renewing, takes longer than the whole visibility. The
+delivery is still at-least-once, and the consumers discard by `sequenceNumber`. A pass may last up to
+`pass-time-budget + confirm-timeout`; it runs on the pool of `SchedulingConfiguration`, so it does not
+stop the heartbeat of the background operations.
+
 ## The queues it consumes: classic or quorum
 
 The three queues below (shifts, positions, track access points) and their DLQs are of the type

@@ -182,7 +182,11 @@ denied. A new role goes to `SecurityRoles` **and** `keycloak/mto-resources-parti
 Publishes `person` (with all its `qualifications` and its `unavailable` periods), `team`, `vehicle` (with
 all its `documents`, its `unavailable` periods and the qualification its model asks of the driver) and `instrument` (`created`/`updated`/`deactivated`), and the
 daily expiry warnings `qualification`, `vehicle-document` and `calibration` (`expiring`/`expired`), on
-`mto.resources.exchange` through the outbox, inside the business transaction; declares no queue (`mto-maintenance` and
+`mto.resources.exchange` through the outbox, inside the business transaction (the relay renews the claim
+of each message before publishing it and does not publish one that is no longer its own, counts the
+attempt at the claim, so a poison message ends `FAILED` too, and drains what there is within
+`app.outbox.pass-time-budget`; timeouts that contradict each other stop the startup; the relay never
+writes the `sequenceNumber`; `docs/06-messaging.md`, `OutboxRelayDataJpaTest`); declares no queue (`mto-maintenance` and
 `mto-notification` declare theirs). What `republish` publishes carries `republished: true`, and a vehicle
 event says whether that change moved its availability (`availabilityChanged`): `mto-notification` notices
 people of changes, not of republications nor of every note. Its three consumer queues and their DLQs

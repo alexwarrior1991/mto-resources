@@ -214,14 +214,24 @@ app:
   # Outbox de los eventos propios, el mismo de mto-maintenance (ver alli cada clave).
   outbox:
     enabled: ${APP_OUTBOX_ENABLED:true}
+    # El intento se cuenta al reclamar el mensaje: tambien lo gasta el que tumba al relay.
     max-attempts: ${APP_OUTBOX_MAX_ATTEMPTS:20}
     initial-retry-delay: ${APP_OUTBOX_INITIAL_RETRY_DELAY:5s}
     max-retry-delay: ${APP_OUTBOX_MAX_RETRY_DELAY:5m}
     retry-jitter: 0.2
     publisher-fixed-delay: ${APP_OUTBOX_PUBLISHER_FIXED_DELAY:5s}
+    # Mensajes que reclama cada lote; una pasada reclama lotes mientras haya trabajo.
     batch-size: 50
-    claim-visibility-timeout: 5m
-    confirm-timeout: 10s
+    # Tiempo que un mensaje reclamado queda invisible para las demas replicas. El relay renueva el
+    # reclamo de cada mensaje antes de publicarlo, asi que no tiene que cubrir el lote entero, pero al
+    # arrancar se exige que sea al menos el doble de confirm-timeout y al menos pass-time-budget +
+    # confirm-timeout: unos plazos que se contradicen impiden arrancar.
+    claim-visibility-timeout: ${APP_OUTBOX_CLAIM_VISIBILITY_TIMEOUT:5m}
+    confirm-timeout: ${APP_OUTBOX_CONFIRM_TIMEOUT:10s}
+    # Tiempo que una pasada sigue reclamando lotes mientras haya trabajo. Con el orden por agregado un
+    # lote lleva un mensaje por agregado: sin vaciar, N eventos de un equipo salian uno cada
+    # publisher-fixed-delay. Cumplido el plazo, lo reclamado sin empezar se suelta.
+    pass-time-budget: ${APP_OUTBOX_PASS_TIME_BUDGET:30s}
     metrics-refresh-delay: 30s
     # Los eventos de un mismo equipo o vehiculo salen en el orden en que se generaron.
     strict-ordering-per-aggregate: true
