@@ -50,7 +50,8 @@ the gateway the prefix is `/api/resources`. Virtual threads are on (`SPRING_THRE
 virtual threads or not, because Boot's scheduler runs every `fixedDelay` on a single thread and an outbox
 relay that waited for the broker stopped the heartbeat of the background operations; `outbox-dispatch`
 stays one thread. Flyway on startup, Hibernate `ddl-auto: validate`: every
-schema change is a new migration, and one that changes an audited table changes its `_aud` twin.
+schema change is a new migration, and one that changes an audited table changes its `_aud` twin; a new
+audited table adds its `idx_<table>_aud_id_rev` `(id, rev)` (`V14`: the history of a row filters by `id`).
 
 ## Architecture
 
@@ -204,7 +205,14 @@ points of `mto-configuration` (`mto.master-data.track-access-point.*` only, on `
 `TrackAccessPointMasterDataHandler`): the master-data envelope says `data.operation`, which becomes the
 `eventName` (`created`/`updated`/`deleted`) of the common inbox and dispatcher (`source_service = mto-configuration`).
 That queue need not exist before `mto-configuration` publishes (other queues are bound to `mto.master-data.#`),
-but what was published before it is loaded by republishing the access points there. **Keys are only added**; a new key or event changes its example in
+but what was published before it is loaded by republishing the access points there. The common inbox is purged once a day (`InboxPurgeService`,
+`configuration/inbox`, `app.inbox.*`, the piece of `mto-maintenance`): `PROCESSED` rows after `retention`
+(30 days, from `processed_at`), `FAILED` ones after `failed-retention` (90 days), in batches with `skip
+locked`; off in the tests, which call it. A purged message is a forgotten one, and a late duplicate is
+stopped by what each source carries in its write, not by the inbox (the sequence watermark of an access
+point; a location recorded once per vehicle, reference and time, and a position that only moves forward;
+`docs/06-messaging.md`, *The inbox forgets*): a new consumed source needs its own before its rows may be
+forgotten. **Keys are only added**; a new key or event changes its example in
 `docs/messaging/examples/` in the same commit. The other way round, the shift examples of
 `mto-maintenance` (`contracts/mto-maintenance/`), the position of `mto-field` (`contracts/mto-field/`) and the
 access point of `mto-configuration` (`contracts/mto-configuration/`) are copied in `src/test/resources/contracts/`
