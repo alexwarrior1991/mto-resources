@@ -132,6 +132,30 @@ died or lost its connection; five lets a couple of ordinary restarts through and
 kills the consumer every time. The DLQs are quorum too, without a limit. Changing the type of an existing
 queue means deleting it first (stop the consumer, let it drain, delete, redeploy).
 
+## The inbox forgets
+
+The three consumers below share one idempotent inbox (`inbox_message`, unique `(message_id,
+source_service)`), and without a purge it only grows: a row per consumed event with its JSON, one per
+field position. `InboxPurgeService` (`configuration/inbox`, `app.inbox.*`; the piece of `mto-maintenance`
+with the same names) deletes once a day (`app.inbox.purge.cron`, 03:43, on the pool of
+`SchedulingConfiguration`) the `PROCESSED` rows applied more than `app.inbox.retention` ago (30 days,
+from `processed_at`) and the `FAILED` ones whose last failure is older than `app.inbox.failed-retention`
+(90 days), in batches of 500 with `skip locked`, each its own transaction, over the existing index
+`(status, received_at)`; `inbox.messages.purged{status}` counts them. The tests switch it off
+(`app.inbox.purge.enabled=false`) and call it.
+
+**A purged message is a forgotten one**: if it came again (only something requeued by hand takes that
+long) it would be applied as new, and `InboxMessageServiceImpl.process` inserts again when its claim
+finds no row. What makes that harmless is not the inbox but what each source carries in its write:
+
+| Source | What stops a late duplicate |
+|---|---|
+| `mto-configuration` (track access points) | the `sequenceNumber` watermark inside the upsert and the deactivation of `TrackAccessPointRepository`: an older change is not written. A message without a sequence applies, as before the purge |
+| `mto-maintenance` (shifts) | `VehicleLocationService.record` records a location of a vehicle once per `(source_reference, observed_at)` (the shift and its `actualStart`/`actualEnd`), and `VehiclePositionRepository.moveTo` only moves a position to a later `observed_at`; a closing whose vehicle was moved by something else afterwards is skipped. A cancelled shift carries no `actualEnd`, so its repetition would record the same parking again with the time of the repetition, only while the vehicle is still where that shift left it |
+| `mto-field` (positions) | the same `record` and `moveTo` with the position's `observedAt`, and a position of a shift that already left the track is ignored |
+
+`vehicle_location_event` is not purged: it is the history of where every vehicle was.
+
 ## Consumed: the shifts of `mto-maintenance`
 
 Queue `mto.resources.maintenance.queue` (declared here, with its DLX `...queue.dlx` and DLQ

@@ -25,6 +25,13 @@ Two layers, answering different questions, both resolving the actor through `Aud
 The seeded project and department have a `BASELINE` revision (`V7`): without it, reading the history
 of a unit under them would fail looking for its parent in `organization_unit_aud`.
 
+Each twin has its primary key `(rev, id)` and, since `V14`, `idx_<table>_aud_id_rev` `(id, rev)`: the
+history of a row filters by `id`, which the key does not lead with, so its count read the whole twin and
+its page walked the whole key (300 000 revisions of people: 15.6 ms → 0.1 ms and 1.5 ms → 0.4 ms). A new
+audited table adds its index in its migration (`BusinessLayerTest.everyAuditTwinHasItsIndexByEntityAndRevision`
+counts them). They are plain `CREATE INDEX IF NOT EXISTS`: on a twin that is already large, create each
+by hand first with `CREATE INDEX CONCURRENTLY` and the same name.
+
 ## Not audited, on purpose
 
 | Entity | Why |

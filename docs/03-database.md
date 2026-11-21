@@ -24,6 +24,7 @@ columns without a foreign key.
 | `V9` | `track_access_point` (the snapshot of the track access points of `mto-configuration`); `vehicle_location_event.access_point_id` |
 | `V10` | Empties the driver qualification `V8` (or the default of then) gave to a model that is not self-propelled: `RR-OPERATOR` on a road-rail one, the licence on a road one; another value chosen by hand stays |
 | `V13` | `background_operation.abandoned_at`: when an operation was given up for abandoned, kept if its work ended afterwards |
+| `V14` | `idx_<table>_aud_id_rev` `(id, rev)` on the nine `_aud` twins: the history of a row filters by `id`, and their primary key leads with `rev` |
 
 ## People and organization (`V5`)
 

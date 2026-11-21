@@ -243,6 +243,25 @@ app:
       max-batches-per-run: 20
       fixed-delay: 1h
 
+  # El inbox de lo que se consume (los turnos de mto-maintenance, las posiciones de mto-field y los puntos
+  # de acceso de mto-configuration). La fila de un mensaje aplicado solo hace falta mientras pueda volver
+  # a llegar con el mismo identificador: una reentrega del broker (segundos), un reintento del outbox del
+  # emisor (algo mas de una hora) o un mensaje que alguien reencola a mano, que es lo unico que tarda
+  # dias. Pasado el plazo, a un duplicado lo para lo que cada fuente lleva en su escritura: la marca de
+  # agua de la secuencia de un punto de acceso, y la ubicacion que no se repite (vehiculo, referencia y
+  # hora) ni mueve la posicion hacia atras de un turno o de una posicion de campo.
+  inbox:
+    retention: ${APP_INBOX_RETENTION:30d}
+    # Una fallida no protege de nada (se reclama otra vez al reencolarla): dice por que acabo en la DLQ.
+    failed-retention: ${APP_INBOX_FAILED_RETENTION:90d}
+    purge:
+      # Con esto en false inbox_message crece con cada evento consumido (una fila por posicion de campo).
+      enabled: ${APP_INBOX_PURGE_ENABLED:true}
+      # Una vez al dia, de madrugada, en la zona del servidor.
+      cron: "${APP_INBOX_PURGE_CRON:0 43 3 * * *}"
+      # Por lotes, cada uno en su transaccion.
+      batch-size: 500
+
   # Lo que tarda se vuelve asincrono (Prefer: respond-async, RFC 7240): el trabajo corre en un hilo
   # virtual, la peticion lo espera hasta su presupuesto y, si no ha terminado, responde 202 con la
   # operacion. El recurso escaso es la conexion que cada operacion retiene mientras trabaja, asi que

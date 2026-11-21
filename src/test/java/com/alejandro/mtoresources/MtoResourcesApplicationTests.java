@@ -112,7 +112,7 @@ class MtoResourcesApplicationTests extends PostgreSQLTestContainer {
                 VehicleService.class, VehicleLocationService.class, RepublishService.class, BudgetedOperations.class,
                 DomainEventPublisher.class, RepublishEndpoint.class, QualificationTypeService.class, PersonQualificationService.class,
                 VehicleDocumentService.class, InstrumentService.class, ExpiryWatchService.class, TrackAccessPointService.class,
-                PersonAbsenceService.class, VehicleRepairService.class, TelematicsService.class, PositionDiscrepancyService.class,
+                PersonAbsenceService.class, VehicleRepairService.class, com.alejandro.mtoresources.application.service.InboxPurgeService.class, TelematicsService.class, PositionDiscrepancyService.class,
                 KeycloakDirectory.class)) {
             assertNotNull(context.getBean(type), type.getSimpleName());
         }

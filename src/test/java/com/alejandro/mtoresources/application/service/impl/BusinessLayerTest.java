@@ -23,6 +23,9 @@ import com.alejandro.mtoresources.application.dto.instrument.InstrumentResponse;
 import com.alejandro.mtoresources.application.dto.instrument.InstrumentUpdateRequest;
 import com.alejandro.mtoresources.application.dto.messaging.DomainEvent;
 import com.alejandro.mtoresources.application.dto.messaging.IncomingEvent;
+import com.alejandro.mtoresources.application.service.InboxPurgeService;
+import com.alejandro.mtoresources.application.dto.messaging.InboxProcessingResult;
+import com.alejandro.mtoresources.application.dto.messaging.InboxMessageCommand;
 import com.alejandro.mtoresources.application.dto.messaging.IncomingEventContext;
 import com.alejandro.mtoresources.application.dto.messaging.MasterDataChangedMessage;
 import com.alejandro.mtoresources.application.dto.operation.OperationResponse;
@@ -249,6 +252,10 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
     private TrackAccessPointMasterDataHandler accessPointHandler;
     @Autowired
     private TrackAccessPointService accessPoints;
+    @Autowired
+    private com.alejandro.mtoresources.application.service.InboxMessageService inbox;
+    @Autowired
+    private com.alejandro.mtoresources.application.service.InboxPurgeService inboxPurge;
     @Autowired
     private RepublishService republish;
     @Autowired
@@ -2435,6 +2442,141 @@ class BusinessLayerTest extends PostgreSQLTestContainer {
                 handled.add(event.entityName() + "." + event.eventName());
             }
         };
+    }
+
+    // ----------------------------------------------------------------- inbox
+
+    /**
+     * La purga olvida lo aplicado hace mas de 30 dias, contado desde que se aplico (lo que llego hace
+     * meses y se aplico ayer se recuerda), y lo fallido hace mas de 90, y no toca nada mas. Un mensaje
+     * olvidado que vuelve a llegar se aplica como nuevo, y lo que lo hace inofensivo no es el inbox sino
+     * lo que cada fuente lleva en su escritura: la marca de agua de la secuencia de un punto de acceso
+     * de mto-configuration, y la ubicacion de un turno de mto-maintenance (la misma de una posicion de
+     * mto-field: las dos pasan por {@code VehicleLocationService.record}), que no se repite con el mismo
+     * vehiculo, referencia y hora ni mueve la posicion hacia atras.
+     */
+    @Test
+    void theInboxForgetsWhatWasAppliedLongAgoAndARedeliveryAfterThatIsHarmless() {
+        String run = UUID.randomUUID().toString();
+        java.util.concurrent.atomic.AtomicInteger applied = new java.util.concurrent.atomic.AtomicInteger();
+        for (String id : List.of("old", "late", "recent")) {
+            assertEquals(InboxProcessingResult.PROCESSED, inbox.process(inboxCommand(run + id, "mto-field"), applied::incrementAndGet));
+        }
+        ageInbox(run + "old", "100 days", "40 days", null);
+        ageInbox(run + "late", "100 days", "1 day", null);
+        inbox.recordFailure(inboxCommand(run + "failed-old", "mto-field"), new IllegalStateException("down"));
+        inbox.recordFailure(inboxCommand(run + "failed-again", "mto-field"), new IllegalStateException("down"));
+        ageInbox(run + "failed-old", "200 days", null, "200 days");
+        ageInbox(run + "failed-again", "200 days", null, "10 days");
+
+        // Un punto de acceso: su alta (secuencia 100), y despues un cambio (110) con otro mensaje.
+        long track = randomId();
+        long accessPoint = randomId();
+        InboxMessageCommand created = inboxCommand(run + "access-created", "mto-configuration");
+        assertEquals(InboxProcessingResult.PROCESSED, inbox.process(created, () -> accessPointHandler.handle(accessPointEvent("created", accessPoint,
+                accessPointValues(accessPoint, "Access A", track, 14L, "1200.000", "PREPARED_ACCESS", true, null, null, true)), masterDataContext(100L))));
+        assertEquals(InboxProcessingResult.PROCESSED, inbox.process(inboxCommand(run + "access-updated", "mto-configuration"),
+                () -> accessPointHandler.handle(accessPointEvent("updated", accessPoint,
+                        accessPointValues(accessPoint, "Access B", track, 14L, "1200.000", "PREPARED_ACCESS", true, null, null, true)), masterDataContext(110L))));
+        // Un turno que empieza con su vehiculo.
+        VehicleResponse towerCar = railVehicle(Set.of());
+        UUID shiftId = UUID.randomUUID();
+        InboxMessageCommand started = inboxCommand(run + "shift-started", "mto-maintenance");
+        Runnable shiftStarted = () -> shiftHandler.handle(contractEvent("shift-started", shiftId, towerCar.id()), context());
+        assertEquals(InboxProcessingResult.PROCESSED, inbox.process(started, shiftStarted));
+        assertEquals(InboxProcessingResult.DUPLICATE_SKIPPED, inbox.process(started, shiftStarted), "Remembered: a duplicate");
+        Instant observedAt = vehicles.findById(towerCar.id()).position().observedAt();
+        ageInbox(run + "access-created", "60 days", "60 days", null);
+        ageInbox(run + "shift-started", "60 days", "60 days", null);
+
+        InboxPurgeService.Purged purged = inboxPurge.purge();
+
+        assertTrue(purged.processed() >= 3 && purged.failed() >= 1, purged.toString());
+        assertEquals(List.of("access-updated", "failed-again", "late", "recent"),
+                jdbc.queryForList("select message_id from inbox_message where message_id like ? order by message_id", String.class, run + "%")
+                        .stream().map(id -> id.substring(run.length())).toList());
+
+        // El alta del punto de acceso vuelve a llegar: se aplica como nueva y su marca de agua la descarta.
+        assertEquals(InboxProcessingResult.PROCESSED, inbox.process(created, () -> accessPointHandler.handle(accessPointEvent("created", accessPoint,
+                accessPointValues(accessPoint, "Access A", track, 14L, "1200.000", "PREPARED_ACCESS", true, null, null, true)), masterDataContext(100L))));
+        assertEquals("Access B", onlyAccessPoint(track, accessPoint).name(), "The watermark of its sequence, not the inbox");
+        // El inicio del turno vuelve a llegar: la ubicacion ya esta, y no se repite ni mueve nada.
+        assertEquals(InboxProcessingResult.PROCESSED, inbox.process(started, shiftStarted));
+        assertEquals(1, jdbc.queryForObject("select count(*) from vehicle_location_event where vehicle_id = ?", Integer.class, towerCar.id()),
+                "The same vehicle, reference and time: recorded once");
+        assertEquals(observedAt, vehicles.findById(towerCar.id()).position().observedAt());
+    }
+
+    /**
+     * La purga borra la fila de un mensaje justo cuando vuelve a llegar: la reclamacion, que espero a su
+     * bloqueo, no encuentra nada. No es un duplicado ya aplicado sino un mensaje olvidado, asi que se
+     * inserta otra vez y se aplica. El duplicado de verdad (la fila sigue ahi) se salta como siempre. Y la
+     * purga repite cada borrado mientras el lote salga lleno, con el plazo de cada estado.
+     */
+    @Test
+    void aMessagePurgedWhileItIsDeliveredAgainIsAppliedAndThePurgeDeletesInBatches() {
+        com.alejandro.mtoresources.infrastructure.persistence.repository.InboxMessageRepository repository =
+                org.mockito.Mockito.mock(com.alejandro.mtoresources.infrastructure.persistence.repository.InboxMessageRepository.class);
+        InboxMessageServiceImpl service = new InboxMessageServiceImpl(repository);
+        InboxMessageCommand command = inboxCommand("op-1", "mto-configuration");
+        java.util.concurrent.atomic.AtomicInteger applied = new java.util.concurrent.atomic.AtomicInteger();
+        org.mockito.Mockito.when(repository.insertIfMissing(org.mockito.ArgumentMatchers.eq("op-1"), org.mockito.ArgumentMatchers.eq("mto-configuration"),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(0, 1, 0);
+        org.mockito.Mockito.when(repository.claimForProcessing("op-1", "mto-configuration")).thenReturn(0, 1, 0);
+        org.mockito.Mockito.when(repository.markProcessed("op-1", "mto-configuration")).thenReturn(1);
+
+        assertEquals(InboxProcessingResult.PROCESSED, service.process(command, applied::incrementAndGet));
+        assertEquals(1, applied.get());
+        assertEquals(InboxProcessingResult.DUPLICATE_SKIPPED, service.process(command, applied::incrementAndGet));
+        assertEquals(1, applied.get());
+
+        io.micrometer.core.instrument.simple.SimpleMeterRegistry meters = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        com.alejandro.mtoresources.configuration.inbox.InboxProperties properties = new com.alejandro.mtoresources.configuration.inbox.InboxProperties(
+                Duration.ofDays(30), null, new com.alejandro.mtoresources.configuration.inbox.InboxProperties.Purge(2));
+        org.mockito.Mockito.when(repository.purgeProcessedBefore(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(2))).thenReturn(2, 2, 1);
+        org.mockito.Mockito.when(repository.purgeFailedBefore(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(2))).thenReturn(0);
+        assertEquals(new InboxPurgeService.Purged(5, 0), new InboxPurgeServiceImpl(repository, properties, meters).purge());
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.times(3))
+                .purgeProcessedBefore(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(2));
+        assertEquals(5.0, meters.counter(InboxPurgeServiceImpl.PURGED_METER, "status", "PROCESSED").count());
+        assertEquals(Duration.ofDays(90), properties.failedRetention(), "The default for the failed ones");
+        assertEquals(Duration.ofDays(30), new com.alejandro.mtoresources.configuration.inbox.InboxProperties(Duration.ZERO, null, null).retention(),
+                "Never forgotten at once");
+    }
+
+    /**
+     * Las nueve gemelas de Envers tienen su indice por (id, rev) (V14): el historial de una fila filtra
+     * por id, y su clave primaria empieza por rev.
+     */
+    @Test
+    void everyAuditTwinHasItsIndexByEntityAndRevision() {
+        for (String table : List.of("person", "organization_unit", "team_member", "vehicle", "person_qualification", "vehicle_document",
+                "instrument", "person_absence", "vehicle_repair")) {
+            String definition = jdbc.queryForObject("select indexdef from pg_indexes where schemaname = current_schema() and indexname = ?",
+                    String.class, "idx_" + table + "_aud_id_rev");
+            assertTrue(definition.endsWith("ON " + jdbc.queryForObject("select current_schema()", String.class) + "." + table + "_aud USING btree (id, rev)"),
+                    definition);
+        }
+        assertEquals(9, jdbc.queryForObject("""
+                select count(*) from information_schema.tables
+                 where table_schema = current_schema() and table_name like '%\\_aud' and table_name <> 'organization_unit_execution_package_aud'
+                """, Integer.class), "A new audited table adds its index here and in its migration");
+    }
+
+    private static InboxMessageCommand inboxCommand(String messageId, String sourceService) {
+        return new InboxMessageCommand(messageId, sourceService, "TEST", "test", "1", "x", "rk", "q", "hash", "{}", null);
+    }
+
+    private void ageInbox(String messageId, String receivedAgo, String processedAgo, String failedAgo) {
+        jdbc.update("""
+                update inbox_message
+                   set received_at = now() - cast(? as interval),
+                       processed_at = case when cast(? as text) is null then processed_at else now() - cast(? as interval) end,
+                       failed_at = case when cast(? as text) is null then failed_at else now() - cast(? as interval) end
+                 where message_id = ?
+                """, receivedAgo, processedAgo, processedAgo, failedAgo, failedAgo, messageId);
     }
 
     /** Un ejemplo de mto-maintenance con su turno y su vehiculo cambiados por los de este test. */
